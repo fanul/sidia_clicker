@@ -357,12 +357,20 @@ async function processMenusWithBadges(page, config) {
         // NOW the Disposisi tab should appear
         console.log(chalk.yellow('  🔹 STEP 4.2: Clicking Disposisi tab...'));
 
-        const disposisiClicked = await clickDisposisiTab(page);
-        if (!disposisiClicked) {
-            console.log(chalk.red('  ✗ Could not click Disposisi tab'));
-            stats.skipped.push(currentMenu.text);
-            stats.skippedCount++;
-            continue; // Try next menu instead of throwing error
+        const disposisiResult = await clickDisposisiTab(page);
+        if (!disposisiResult.success) {
+            if (disposisiResult.reason === 'false_positive_badge' || disposisiResult.shouldSkip) {
+                console.log(chalk.yellow(`  ⚠ False positive badge detected in "${currentMenu.text}" - skipping submenu`));
+                console.log(chalk.yellow(`  → Badge shows ${currentMenu.badge} documents but no font-weight-black elements found`));
+                stats.skipped.push(currentMenu.text + ' (false positive)');
+                stats.skippedCount++;
+                continue; // Skip to next menu
+            } else {
+                console.log(chalk.red('  ✗ Could not click Disposisi tab'));
+                stats.skipped.push(currentMenu.text);
+                stats.skippedCount++;
+                continue; // Try next menu instead of throwing error
+            }
         }
 
         console.log(chalk.green('  ✓ Disposisi tab clicked successfully'));
@@ -474,9 +482,12 @@ async function processDocumentsFromTable(page, menu, config) {
     let hasDocuments = true;
     let processedCount = 0;
     let consecutiveEmptyChecks = 0;
+    let consecutiveDetailPageErrors = 0;
     const maxEmptyChecks = 2; // Give up after 2 consecutive empty checks
+    const maxDetailPageErrors = 3; // Give up after 3 consecutive detail page errors
+    const maxDocumentsToProcess = 100; // Safety limit to prevent infinite loops
 
-    while (hasDocuments && consecutiveEmptyChecks < maxEmptyChecks) {
+    while (hasDocuments && consecutiveEmptyChecks < maxEmptyChecks && consecutiveDetailPageErrors < maxDetailPageErrors && processedCount < maxDocumentsToProcess) {
         // After Kembali, we need to click Disposisi tab again to see documents
         console.log(chalk.gray(`    → Preparing to process document ${processedCount + 1}...`));
 
@@ -493,12 +504,76 @@ async function processDocumentsFromTable(page, menu, config) {
         console.log(chalk.gray(`    → Current URL: ${currentState.url}`));
         console.log(chalk.gray(`    → Has Lihat buttons: ${currentState.hasLihatButtons}`));
 
+        // Check if we're on a document detail page (where Disposisi tab doesn't exist)
+        const isOnDetailPage = currentState.url.includes('/inbox/') && currentState.url.includes('?obj=');
+
+        if (isOnDetailPage) {
+            consecutiveDetailPageErrors++;
+            console.log(chalk.yellow(`    → Still on document detail page (error ${consecutiveDetailPageErrors}/${maxDetailPageErrors})`));
+            console.log(chalk.yellow('    → Attempting navigation away from detail page...'));
+
+            // Try to navigate away from the detail page
+            try {
+                // Strategy 1: Try to click Kembali button
+                const kembaliClicked = await page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('button, .v-btn'));
+                    for (const btn of buttons) {
+                        const text = (btn.textContent || '').trim().toUpperCase();
+                        if (text.includes('KEMBALI') && btn.offsetParent !== null && !btn.disabled) {
+                            btn.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                if (kembaliClicked) {
+                    console.log(chalk.gray('    → Clicked Kembali to leave detail page'));
+                    await sleep(3000);
+                } else {
+                    // Strategy 2: Try browser back
+                    console.log(chalk.gray('    → Kembali not found, trying browser back...'));
+                    await page.goBack({ waitUntil: 'networkidle2' });
+                    await sleep(3000);
+                }
+
+                // Check if navigation worked
+                const newUrl = page.url();
+                const stillOnDetailPage = newUrl.includes('/inbox/') && newUrl.includes('?obj=');
+
+                if (!stillOnDetailPage) {
+                    console.log(chalk.green('    → Successfully navigated away from detail page'));
+                    consecutiveDetailPageErrors = 0; // Reset counter on success
+                    continue; // Try again with clean state
+                } else {
+                    console.log(chalk.yellow('    → Still on detail page after navigation attempt'));
+                    if (consecutiveDetailPageErrors >= maxDetailPageErrors) {
+                        console.log(chalk.red('    → Max detail page errors reached, breaking loop'));
+                        break;
+                    }
+                    await sleep(2000); // Wait before next attempt
+                    continue; // Try again
+                }
+
+            } catch (navError) {
+                console.log(chalk.red(`    → Navigation failed: ${navError.message}`));
+                if (consecutiveDetailPageErrors >= maxDetailPageErrors) {
+                    console.log(chalk.red('    → Max detail page errors reached, breaking loop'));
+                    break;
+                }
+                continue;
+            }
+        } else {
+            // Reset counter when we're not on detail page
+            consecutiveDetailPageErrors = 0;
+        }
+
         // If we don't have Lihat buttons visible, we need to click Disposisi tab
         if (!currentState.hasLihatButtons) {
             console.log(chalk.yellow('    → No Lihat buttons visible, clicking Disposisi tab...'));
 
-            const disposisiClicked = await clickDisposisiTab(page);
-            if (!disposisiClicked) {
+            const disposisiResult = await clickDisposisiTab(page);
+            if (!disposisiResult.success) {
                 console.log(chalk.red('  ✗ Could not click Disposisi tab for next document'));
                 break;
             }
@@ -561,6 +636,18 @@ async function processDocumentsFromTable(page, menu, config) {
     }
 
     stats.totalProcessed = processedCount;
+
+    // Log if we hit any safety limits
+    if (processedCount >= maxDocumentsToProcess) {
+        console.log(chalk.yellow(`    → Reached maximum document processing limit (${maxDocumentsToProcess})`));
+        console.log(chalk.yellow('    → Stopping to prevent infinite loop'));
+    } else if (consecutiveDetailPageErrors >= maxDetailPageErrors) {
+        console.log(chalk.yellow(`    → Reached maximum detail page error limit (${maxDetailPageErrors})`));
+        console.log(chalk.yellow('    → Stopping to prevent infinite loop'));
+    } else if (consecutiveEmptyChecks >= maxEmptyChecks) {
+        console.log(chalk.yellow(`    → Reached maximum empty check limit (${maxEmptyChecks})`));
+        console.log(chalk.yellow('    → All documents likely processed'));
+    }
 
     return stats;
 }

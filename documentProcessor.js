@@ -116,60 +116,142 @@ async function processSingleDocument(page, config) {
         const currentUrl = page.url();
         console.log(chalk.gray(`      → Current URL: ${currentUrl}`));
 
-        // STEP 3: Wait for and click Feedback button
-        console.log(chalk.gray('      → Waiting for Feedback button to appear...'));
+        // STEP 3: Wait for and click Feedback button with enhanced retry logic
+        console.log(chalk.gray('      → Waiting for Feedback button to appear (may load via AJAX)...'));
 
+        // Enhanced Feedback button search with progress reporting
+        let feedbackButtonFound = false;
+        let feedbackAttempts = 0;
+        const maxFeedbackAttempts = 15; // Up to 15 seconds
         const feedbackButton = await findButtonSmart(page, {
             buttonText: 'Feedback',
             searchType: 'includes',
             mustBeEnabled: true,
             mustBeVisible: true,
-            timeout: 10000  // Give it more time to appear (10 seconds)
+            timeout: 15000  // 15 seconds total timeout
         });
 
-        if (!feedbackButton.found) {
-            console.log(chalk.red('      ✗ Feedback button not found'));
-            // DEBUGGING: Screenshots disabled by default, enable via ENABLE_SCREENSHOTS=true
-            // console.log(chalk.gray('      → Taking screenshot for debugging...'));
+        // Also implement manual retry loop with better debugging
+        while (!feedbackButtonFound && feedbackAttempts < maxFeedbackAttempts) {
+            feedbackAttempts++;
+            console.log(chalk.gray(`      → Feedback button search attempt ${feedbackAttempts}/${maxFeedbackAttempts}...`));
 
-            // Capture debug info
-            const pageContent = await page.evaluate(() => {
-                const allButtons = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
+            const manualCheck = await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
+                const feedbackBtn = buttons.find(btn => {
+                    const text = (btn.textContent || '').trim();
+                    return text.includes('Feedback') && btn.offsetParent !== null && !btn.disabled;
+                });
+
+                if (feedbackBtn) {
+                    const rect = feedbackBtn.getBoundingClientRect();
+                    return {
+                        found: true,
+                        text: (feedbackBtn.textContent || '').trim(),
+                        visible: feedbackBtn.offsetParent !== null,
+                        enabled: !feedbackBtn.disabled,
+                        position: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+                    };
+                }
+
+                // Return debugging info if not found
                 return {
-                    buttonCount: allButtons.length,
-                    firstButtons: allButtons.slice(0, 15).map(btn => ({
-                        text: (btn.textContent || '').trim(),
-                        disabled: btn.disabled,
-                        visible: btn.offsetParent !== null
-                    })),
-                    pageText: document.body.textContent.substring(0, 500)
+                    found: false,
+                    totalButtons: buttons.length,
+                    buttonTexts: buttons.slice(0, 10).map(btn => (btn.textContent || '').trim()),
+                    hasLoading: document.querySelector('.v-progress-linear, .loading, [role="progressbar"]') !== null
                 };
             });
 
-            console.log(chalk.gray('      → Page content:', JSON.stringify(pageContent, null, 2)));
+            if (manualCheck.found) {
+                feedbackButtonFound = true;
+                console.log(chalk.green(`      ✓ Feedback button found: "${manualCheck.text}"`));
+                console.log(chalk.gray(`      → Position: x=${Math.round(manualCheck.position.x)}, y=${Math.round(manualCheck.position.y)}`));
+                break;
+            } else {
+                console.log(chalk.gray(`      → Not found yet. Buttons: ${manualCheck.totalButtons}, Loading: ${manualCheck.hasLoading}`));
 
+                // Show available buttons every 5th attempt for debugging
+                if (feedbackAttempts % 5 === 0) {
+                    console.log(chalk.gray('      → Available buttons:', JSON.stringify(manualCheck.buttonTexts, null, 2)));
+                }
+
+                await sleep(1000); // Wait 1 second between attempts
+            }
+        }
+
+        if (!feedbackButtonFound && !feedbackButton.found) {
+            console.log(chalk.red('      ✗ Feedback button not found after all attempts'));
+
+            // Final debug info
+            const finalDebug = await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
+                return {
+                    totalButtons: buttons.length,
+                    buttonTexts: buttons.map(btn => (btn.textContent || '').trim()),
+                    url: window.location.href,
+                    hasLoading: document.querySelector('.v-progress-linear, .loading, [role="progressbar"]') !== null
+                };
+            });
+
+            console.log(chalk.gray('      → Final state:', JSON.stringify(finalDebug, null, 2)));
             return false;
         }
 
         console.log(chalk.green('      ✓ Feedback button found, clicking...'));
 
-        // Click the feedback button
-        const feedbackClickResult = await clickButtonSmart('Feedback', page);
-        if (!feedbackClickResult.success) {
+        // Click the feedback button with enhanced Vue.js handling
+        console.log(chalk.gray('      → Clicking Feedback button with Vue.js events...'));
+
+        const feedbackClickResult = await page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button, .v-btn'));
+            for (const btn of buttons) {
+                const btnText = (btn.textContent || '').trim();
+                if (btnText.includes('Feedback') && btn.offsetParent !== null && !btn.disabled) {
+                    // Get button position for Vue.js events
+                    const rect = btn.getBoundingClientRect();
+
+                    // Multiple click approaches for Vue.js
+                    // 1. Native click
+                    btn.click();
+
+                    // 2. Mouse events with coordinates
+                    const events = ['mousedown', 'mouseup', 'click', 'focus'];
+                    events.forEach(eventType => {
+                        const event = new MouseEvent(eventType, {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                            clientX: rect.x + rect.width / 2,
+                            clientY: rect.y + rect.height / 2
+                        });
+                        btn.dispatchEvent(event);
+                    });
+
+                    // 3. Additional Vue-specific events
+                    btn.dispatchEvent(new Event('input', { bubbles: true }));
+                    btn.dispatchEvent(new Event('change', { bubbles: true }));
+
+                    return { clicked: true };
+                }
+            }
+            return { clicked: false };
+        });
+
+        if (!feedbackClickResult.clicked) {
             console.log(chalk.red('      ✗ Failed to click Feedback button'));
             return false;
         }
 
         console.log(chalk.green('      ✓ Feedback button clicked successfully'));
-        await sleep(2000);
 
-        // STEP 4: Fill textarea with feedback text
-        console.log(chalk.gray('      → Looking for textarea to fill feedback...'));
+        // Wait for AJAX to load the feedback section with textarea
+        console.log(chalk.gray('      → Waiting for feedback AJAX to load textarea...'));
 
-        // Wait for textarea to appear
+        // Wait for textarea to appear with longer retry time for AJAX
         let textareaFound = false;
         let textareaAttempts = 0;
-        const maxTextareaAttempts = 10;
+        const maxTextareaAttempts = 20; // Increased from 10 to 20 (up to 20 seconds)
 
         while (!textareaFound && textareaAttempts < maxTextareaAttempts) {
             textareaAttempts++;
@@ -296,12 +378,49 @@ async function processSingleDocument(page, config) {
                 break;
             } else {
                 console.log(chalk.yellow(`      → Textarea not visible yet, waiting...`));
-                await sleep(1000);
+                await sleep(1000); // Wait 1 second between attempts (increased from 500ms)
+
+                // On every 5th attempt, provide more detailed debugging
+                if (textareaAttempts % 5 === 0) {
+                    const debugInfo = await page.evaluate(() => {
+                        const textarea = document.querySelector('textarea');
+                        const dialogs = document.querySelectorAll('[role="dialog"], .v-dialog, .v-card');
+                        const forms = document.querySelectorAll('form, .v-form');
+                        const inputFields = document.querySelectorAll('input, textarea, .v-input');
+
+                        return {
+                            hasTextarea: textarea !== null,
+                            textareaVisible: textarea ? textarea.offsetParent !== null : false,
+                            dialogCount: dialogs.length,
+                            formCount: forms.length,
+                            inputCount: inputFields.length,
+                            // Check if there's a loading indicator
+                            hasLoading: document.querySelector('.v-progress-linear, .loading, [role="progressbar"]') !== null
+                        };
+                    });
+
+                    console.log(chalk.gray(`      → Debug: Textarea=${debugInfo.hasTextarea}, Visible=${debugInfo.textareaVisible}, Dialogs=${debugInfo.dialogCount}, Forms=${debugInfo.formCount}, Loading=${debugInfo.hasLoading}`));
+                }
             }
         }
 
         if (!textareaFound) {
-            console.log(chalk.red('      ✗ Textarea not found after 10 attempts'));
+            console.log(chalk.red(`      ✗ Textarea not found after ${maxTextareaAttempts} attempts`));
+            console.log(chalk.yellow('      → Feedback section may not have loaded properly, or Feedback button click failed'));
+
+            // Final debug info
+            const finalDebug = await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button, .v-btn'));
+                return {
+                    totalButtons: buttons.length,
+                    buttonTexts: buttons.slice(0, 15).map(btn => (btn.textContent || '').trim()),
+                    hasTextarea: document.querySelector('textarea') !== null,
+                    hasForms: document.querySelectorAll('form, .v-form').length > 0,
+                    url: window.location.href
+                };
+            });
+
+            console.log(chalk.gray('      → Final state:', JSON.stringify(finalDebug, null, 2)));
             return false;
         }
 
@@ -332,13 +451,8 @@ async function processSingleDocument(page, config) {
             };
         });
 
-        console.log(chalk.gray('      → Page state check:'));
-        console.log(chalk.gray(`      → Textarea value: "${pageState.textareaValue}"`));
-        console.log(chalk.gray(`      → Simpan buttons found: ${pageState.simpanButtonsFound}`));
-
-        if (pageState.simpanButtonsFound > 0) {
-            console.log(chalk.gray('      → Simpan button details:', JSON.stringify(pageState.simpanButtonDetails, null, 2)));
-        }
+        // Production: Minimal logging
+        console.log(chalk.gray(`      → Textarea: "${pageState.textareaValue}", Simpan buttons: ${pageState.simpanButtonsFound}`));
 
         // STEP 6: Click Simpan button
         console.log(chalk.gray('      → Looking for Simpan button...'));
@@ -426,20 +540,15 @@ async function processSingleDocument(page, config) {
             };
         });
 
-        console.log(chalk.gray(`      → Total buttons: ${buttonDebug.totalButtons}`));
-        console.log(chalk.gray(`      → Kembali candidates: ${buttonDebug.kembaliCandidates}`));
-        console.log(chalk.gray(`      → Current URL: ${buttonDebug.currentUrl}`));
+        // Production: Minimal logging - only essential info
+        console.log(chalk.gray(`      → Buttons: ${buttonDebug.totalButtons}, Kembali candidates: ${buttonDebug.kembaliCandidates}`));
 
         if (buttonDebug.kembaliCandidates > 0) {
-            console.log(chalk.gray('      → Kembali button details:', JSON.stringify(buttonDebug.kembaliDetails, null, 2)));
-
             // Check if Kembali button has href attribute (might be a link)
             const hasHref = buttonDebug.kembaliDetails.some(btn => btn.href);
             if (hasHref) {
-                console.log(chalk.green('      → Kembali button has href attribute - will try direct navigation'));
+                console.log(chalk.gray('      → Kembali has href, will use direct navigation'));
             }
-        } else {
-            console.log(chalk.gray('      → First 20 button texts:', JSON.stringify(buttonDebug.allButtonTexts, null, 2)));
         }
 
         // Try multiple search strategies for Kembali button
@@ -482,13 +591,12 @@ async function processSingleDocument(page, config) {
 
             if (buttonSearch.found) {
                 console.log(chalk.green(`      ✓ Kembali button found: "${buttonSearch.text}"`));
-                console.log(chalk.gray(`      → Button type: ${buttonSearch.tagName}`));
-                console.log(chalk.gray(`      → Button position: x=${buttonSearch.rect.x}, y=${buttonSearch.rect.y}`));
+
+                // Production: Only log essential info
                 if (buttonSearch.href) {
-                    console.log(chalk.gray(`      → Href: ${buttonSearch.href}`));
-                }
-                if (buttonSearch.onclick) {
-                    console.log(chalk.gray(`      → Onclick: ${buttonSearch.onclick}`));
+                    console.log(chalk.gray(`      → Type: ${buttonSearch.tagName}, has href`));
+                } else {
+                    console.log(chalk.gray(`      → Type: ${buttonSearch.tagName}`));
                 }
 
                 let navigationSuccessful = false;
@@ -496,20 +604,20 @@ async function processSingleDocument(page, config) {
                 // Strategy 1: If it's an anchor tag with href, navigate directly
                 if (buttonSearch.tagName === 'A' && buttonSearch.href) {
                     try {
-                        console.log(chalk.gray('      → Strategy 1: Direct href navigation...'));
+                        console.log(chalk.gray('      → Strategy 1: Direct href...'));
                         await page.goto(buttonSearch.href, { waitUntil: 'networkidle2' });
                         await sleep(2000);
                         navigationSuccessful = true;
-                        console.log(chalk.green('      ✓ Direct href navigation successful'));
+                        console.log(chalk.green('      ✓ Direct href success'));
                     } catch (e) {
-                        console.log(chalk.yellow(`      → Direct href navigation failed: ${e.message}`));
+                        console.log(chalk.yellow(`      → Direct href failed: ${e.message}`));
                     }
                 }
 
                 // Strategy 2: Try Puppeteer's direct click using text selector
                 if (!navigationSuccessful) {
                     try {
-                        console.log(chalk.gray('      → Strategy 2: Puppeteer click with text...'));
+                        console.log(chalk.gray('      → Strategy 2: Text click...'));
                         await page.click(`:text("${buttonSearch.text}")`, { timeout: 5000 });
                         await sleep(2000);
 
@@ -517,21 +625,19 @@ async function processSingleDocument(page, config) {
                         const newUrl = page.url();
                         if (newUrl !== buttonSearch.currentUrl) {
                             navigationSuccessful = true;
-                            console.log(chalk.green('      ✓ Puppeteer text click successful'));
+                            console.log(chalk.green('      ✓ Text click success'));
                         }
                     } catch (e) {
-                        console.log(chalk.yellow(`      → Puppeteer text click failed: ${e.message}`));
+                        console.log(chalk.yellow(`      → Text click failed: ${e.message}`));
                     }
                 }
 
                 // Strategy 3: Use Puppeteer's click with coordinates (HEADLESS COMPATIBLE)
                 if (!navigationSuccessful) {
                     try {
-                        console.log(chalk.gray('      → Strategy 3: Puppeteer coordinate click (headless compatible)...'));
+                        console.log(chalk.gray('      → Strategy 3: Coordinate click...'));
                         const x = buttonSearch.rect.x + buttonSearch.rect.width / 2;
                         const y = buttonSearch.rect.y + buttonSearch.rect.height / 2;
-
-                        console.log(chalk.gray(`      → Clicking at coordinates: x=${Math.round(x)}, y=${Math.round(y)}`));
 
                         // Multiple coordinate click methods for better headless compatibility
                         await page.mouse.move(x, y);
@@ -549,18 +655,18 @@ async function processSingleDocument(page, config) {
                         const newUrl = page.url();
                         if (newUrl !== buttonSearch.currentUrl) {
                             navigationSuccessful = true;
-                            console.log(chalk.green('      ✓ Puppeteer coordinate click successful'));
+                            console.log(chalk.green('      ✓ Coordinate click success'));
                         } else {
                             console.log(chalk.yellow('      → Coordinate click executed but URL did not change'));
                         }
                     } catch (e) {
-                        console.log(chalk.yellow(`      → Puppeteer coordinate click failed: ${e.message}`));
+                        console.log(chalk.yellow(`      → Coordinate click failed: ${e.message}`));
                     }
                 }
 
                 // Strategy 4: JavaScript click with comprehensive Vue.js event handling
                 if (!navigationSuccessful) {
-                    console.log(chalk.gray('      → Strategy 4: JavaScript click with Vue events...'));
+                    console.log(chalk.gray('      → Strategy 4: JavaScript click...'));
                     const jsClickResult = await page.evaluate(() => {
                         const allButtons = Array.from(document.querySelectorAll('button, .v-btn, a'));
                         for (const btn of allButtons) {
@@ -608,7 +714,7 @@ async function processSingleDocument(page, config) {
                     if (jsClickResult.clicked || jsClickResult.usedHref) {
                         await sleep(2000);
                         navigationSuccessful = true;
-                        console.log(chalk.green('      ✓ JavaScript click executed'));
+                        console.log(chalk.green('      ✓ JavaScript click success'));
 
                         if (jsClickResult.usedHref) {
                             console.log(chalk.gray('      → Used href navigation'));
@@ -618,12 +724,12 @@ async function processSingleDocument(page, config) {
 
                 // Strategy 5: Try browser back button as last resort
                 if (!navigationSuccessful) {
-                    console.log(chalk.yellow('      → Strategy 5: Trying browser back button...'));
+                    console.log(chalk.yellow('      → Strategy 5: Browser back...'));
                     try {
                         await page.goBack({ waitUntil: 'networkidle2' });
                         await sleep(2000);
                         navigationSuccessful = true;
-                        console.log(chalk.green('      ✓ Browser back button successful'));
+                        console.log(chalk.green('      ✓ Browser back success'));
                     } catch (e) {
                         console.log(chalk.yellow(`      → Browser back failed: ${e.message}`));
                     }
@@ -742,6 +848,45 @@ async function processSingleDocument(page, config) {
 
     } catch (error) {
         console.log(chalk.red(`      ✗ Error processing document: ${error.message}`));
+
+        // Error recovery: Try to get back to a safe state
+        console.log(chalk.gray('      → Attempting error recovery...'));
+
+        try {
+            // Check if we're stuck on a document detail page
+            const currentUrl = page.url();
+            console.log(chalk.gray(`      → Current URL: ${currentUrl}`));
+
+            if (currentUrl.includes('/inbox/') && currentUrl.includes('?obj=')) {
+                console.log(chalk.yellow('      → Stuck on document detail page, trying to navigate back...'));
+
+                // Try to click Kembali button to get back to list
+                const kembaliFound = await page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('button, .v-btn'));
+                    for (const btn of buttons) {
+                        const text = (btn.textContent || '').trim().toUpperCase();
+                        if (text.includes('KEMBALI') && btn.offsetParent !== null && !btn.disabled) {
+                            btn.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                if (kembaliFound) {
+                    console.log(chalk.gray('      → Clicked Kembali for error recovery'));
+                    await sleep(3000);
+                } else {
+                    // Try browser back as last resort
+                    console.log(chalk.yellow('      → Kembali not found, trying browser back...'));
+                    await page.goBack({ waitUntil: 'networkidle2' });
+                    await sleep(3000);
+                }
+            }
+        } catch (recoveryError) {
+            console.log(chalk.gray('      → Recovery failed, continuing anyway...'));
+        }
+
         return false;
     }
 }
@@ -796,7 +941,7 @@ async function clickButtonSmart(buttonText, page) {
  * @returns {Promise<Object>} Result object
  */
 async function clickLihatButton(page) {
-    console.log('🔍 DEBUG: Starting Lihat button search...');
+    console.log(chalk.gray('🔍 Starting Lihat button search...'));
 
     const debugInfo = await page.evaluate(() => {
         const debug = {
@@ -845,17 +990,18 @@ async function clickLihatButton(page) {
         return debug;
     });
 
-    console.log('🔍 DEBUG Results:', JSON.stringify(debugInfo, null, 2));
+    // Production: Minimal debug output
+    console.log(chalk.gray(`🔍 Lihat search: ${debugInfo.lihatButtonsFound.length} buttons found`));
 
     // Now click the FIRST Lihat button directly using Puppeteer
     if (debugInfo.activeWindowExists && debugInfo.lihatButtonsFound.length > 0) {
-        console.log(`✅ Found ${debugInfo.lihatButtonsFound.length} Lihat buttons, clicking the first one...`);
+        console.log(chalk.gray(`✅ Clicking first Lihat button...`));
 
         try {
             // Use Puppeteer's direct page.click() with CSS selector
             const firstButtonSelector = '.v-window-item--active button.v-btn';
             await page.click(firstButtonSelector, { clickCount: 1, delay: 200 });
-            console.log('✅ Clicked first Lihat button using direct Puppeteer click');
+            console.log(chalk.green('✅ Lihat button clicked'));
 
             // Wait for the feedback section to appear
             await sleep(2000);
