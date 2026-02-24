@@ -276,6 +276,82 @@ async function checkForDocuments(page) {
 }
 
 /**
+ * Check if there are remaining documents with font-weight-black (real documents)
+ * @param {Page} page - Puppeteer page instance
+ * @returns {Promise<Object>} Object with hasRemainingDocuments, remainingCount, and details
+ */
+async function checkRemainingDocuments(page) {
+    console.log(chalk.yellow('  → Checking for remaining documents with font-weight-black...'));
+
+    const result = await page.evaluate(() => {
+        // Look for active window
+        const activeWindow = document.querySelector('.v-window-item--active');
+        if (!activeWindow) {
+            return { hasRemainingDocuments: false, reason: 'no_active_window' };
+        }
+
+        // Look for data table
+        const dataTable = activeWindow.querySelector('.v-data-table');
+        if (!dataTable) {
+            return { hasRemainingDocuments: false, reason: 'no_data_table' };
+        }
+
+        const tbody = dataTable.querySelector('tbody');
+        if (!tbody) {
+            return { hasRemainingDocuments: false, reason: 'no_tbody' };
+        }
+
+        // Get all rows except empty wrapper
+        const rows = Array.from(tbody.querySelectorAll('tr')).filter(tr =>
+            !tr.classList.contains('v-data-table__empty-wrapper')
+        );
+
+        if (rows.length === 0) {
+            return { hasRemainingDocuments: false, reason: 'no_rows', remainingCount: 0 };
+        }
+
+        // Check for font-weight-black elements (real documents)
+        let remainingCount = 0;
+        const rowDetails = [];
+
+        rows.forEach((row, index) => {
+            const blackElements = row.querySelectorAll('.font-weight-black');
+            const hasBlack = blackElements.length > 0;
+
+            // Get row text for debugging
+            const rowText = row.textContent.trim().substring(0, 50);
+
+            if (hasBlack) {
+                remainingCount++;
+            }
+
+            rowDetails.push({
+                rowIndex: index,
+                hasFontWeightBlack: hasBlack,
+                text: rowText
+            });
+        });
+
+        return {
+            hasRemainingDocuments: remainingCount > 0,
+            remainingCount: remainingCount,
+            totalRows: rows.length,
+            rowDetails: rowDetails,
+            reason: remainingCount > 0 ? 'documents_remaining' : 'no_font_weight_black'
+        };
+    });
+
+    if (result.hasRemainingDocuments) {
+        console.log(chalk.green(`    → Found ${result.remainingCount} remaining documents with font-weight-black out of ${result.totalRows} rows`));
+    } else {
+        console.log(chalk.yellow(`    → No documents with font-weight-black found (${result.totalRows} rows total)`));
+        console.log(chalk.yellow('    → Sub-menu flow can finish'));
+    }
+
+    return result;
+}
+
+/**
  * Process all menus with badges
  * @param {Page} page - Puppeteer page instance
  * @param {Object} config - Configuration object
@@ -448,12 +524,41 @@ async function processMenusWithBadges(page, config) {
 
         console.log(chalk.yellow(`\n  🔹 STEP 4.4: Processing documents from ${currentMenu.text}...`));
 
-        // Process documents from the current menu
-        const menuStats = await processDocumentsFromTable(page, currentMenu, config);
-        stats.totalProcessed += menuStats.totalProcessed;
-        Object.assign(stats.byType, menuStats.byType);
+        // Process documents from the current menu (may need multiple passes)
+        let menuComplete = false;
+        let menuPassCount = 0;
+        const maxMenuPasses = 10; // Safety limit to prevent infinite loops
 
-        console.log(chalk.green(`  ✓ Completed ${currentMenu.text}: ${menuStats.totalProcessed} documents processed`));
+        while (!menuComplete && menuPassCount < maxMenuPasses) {
+            menuPassCount++;
+            console.log(chalk.yellow(`    → Processing pass ${menuPassCount} for ${currentMenu.text}...`));
+
+            // Process documents from the current menu
+            const menuStats = await processDocumentsFromTable(page, currentMenu, config);
+            stats.totalProcessed += menuStats.totalProcessed;
+            Object.assign(stats.byType, menuStats.byType);
+
+            console.log(chalk.green(`    → Pass ${menuPassCount} completed: ${menuStats.totalProcessed} documents processed`));
+
+            // Check if there are remaining documents with font-weight-black
+            if (menuStats.hasRemainingDocuments) {
+                console.log(chalk.yellow(`    → ⚠ ${menuStats.remainingCount} documents with font-weight-black remaining`));
+                console.log(chalk.yellow('    → Continuing with another pass to process remaining documents...'));
+
+                // Continue the loop to process remaining documents
+                await sleep(3000); // Wait before next pass
+            } else {
+                console.log(chalk.green(`    → ✓ All documents processed from ${currentMenu.text}`));
+                menuComplete = true;
+            }
+        }
+
+        if (menuPassCount >= maxMenuPasses) {
+            console.log(chalk.yellow(`    → Reached maximum pass limit (${maxMenuPasses}) for ${currentMenu.text}`));
+            console.log(chalk.yellow('    → Moving to next menu to prevent infinite loop'));
+        }
+
+        console.log(chalk.green(`  ✓ Completed ${currentMenu.text}: ${stats.totalProcessed} total documents processed`));
     }
 
     console.log(chalk.green('\n✓ All menus processed'));
@@ -649,6 +754,61 @@ async function processDocumentsFromTable(page, menu, config) {
         console.log(chalk.yellow('    → All documents likely processed'));
     }
 
+    // CRITICAL: Check for remaining documents with font-weight-black after processing
+    console.log(chalk.yellow('\n  🔹 STEP 4.5: Checking if sub-menu flow should continue...'));
+
+    // Make sure we're on the document list page (not detail page)
+    const currentUrl = page.url();
+    const isOnDetailPage = currentUrl.includes('/inbox/') && currentUrl.includes('?obj=');
+
+    if (isOnDetailPage) {
+        console.log(chalk.yellow('    → Still on document detail page, navigating away...'));
+        // Navigate away to get back to document list
+        const kembaliClicked = await page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button, .v-btn'));
+            for (const btn of buttons) {
+                const text = (btn.textContent || '').trim().toUpperCase();
+                if (text.includes('KEMBALI') && btn.offsetParent !== null && !btn.disabled) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+        });
+
+        if (kembaliClicked) {
+            await sleep(3000);
+        }
+    }
+
+    // Click Disposisi tab to ensure we're on the right view
+    const disposisiResult = await clickDisposisiTab(page);
+    if (disposisiResult.success) {
+        await sleep(3000);
+
+        // Check for remaining documents with font-weight-black
+        const remainingCheck = await checkRemainingDocuments(page);
+
+        if (remainingCheck.hasRemainingDocuments) {
+            console.log(chalk.yellow(`    → ⚠ Sub-menu flow should continue: ${remainingCheck.remainingCount} documents with font-weight-black remaining`));
+            console.log(chalk.yellow('    → These documents still need to be processed'));
+
+            // Add remaining count to stats for caller to decide
+            stats.hasRemainingDocuments = true;
+            stats.remainingCount = remainingCheck.remainingCount;
+            stats.remainingDetails = remainingCheck.rowDetails;
+        } else {
+            console.log(chalk.green('    → ✓ Sub-menu flow can finish: No documents with font-weight-black found'));
+            console.log(chalk.green('    → All real documents have been processed'));
+
+            stats.hasRemainingDocuments = false;
+            stats.remainingCount = 0;
+        }
+    } else {
+        console.log(chalk.yellow('    → Could not click Disposisi tab for final check'));
+        stats.hasRemainingDocuments = false;
+    }
+
     return stats;
 }
 
@@ -656,5 +816,6 @@ module.exports = {
     navigateToNaskahMasuk,
     processMenusWithBadges,
     processSingleDocument,
-    checkForDocuments
+    checkForDocuments,
+    checkRemainingDocuments
 };
