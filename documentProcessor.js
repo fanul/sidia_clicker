@@ -275,8 +275,8 @@ async function processSingleDocument(page, config) {
                 textareaFound = true;
                 console.log(chalk.green(`      ✓ Textarea found: ${textareaCheck.id || textareaCheck.name}`));
 
-                // Fill the textarea with the required text
-                const feedbackText = "Dipedomani dan dilaksanakan";
+                // Fill the textarea with the required text from config
+                const feedbackText = config.feedbackMessage || "Dipedomani dan dilaksanakan";
                 console.log(chalk.gray(`      → Filling textarea with: "${feedbackText}"`));
 
                 // First, focus the textarea using JavaScript
