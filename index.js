@@ -13,6 +13,7 @@ const { launchBrowser, createPage } = require('./browser');
 const { login, selectRole } = require('./login');
 const { navigateToNaskahMasuk, processMenusWithBadges } = require('./documents');
 const { createStats, completeProcessing, displaySummary } = require('./stats');
+const { preventSleep, restoreSleep } = require('./keepAwake');
 
 // Configuration
 const CONFIG = {
@@ -49,6 +50,14 @@ async function main() {
         // Validate configuration
         validateConfig();
 
+        // Prevent system from sleeping during automation (can be disabled with env var)
+        if (process.env.PREVENT_SLEEP !== 'false') {
+            console.log(chalk.yellow('🔋 Preventing system sleep...'));
+            preventSleep();
+        } else {
+            console.log(chalk.gray('→ Sleep prevention disabled via PREVENT_SLEEP=false'));
+        }
+
         // Launch browser
         console.log(chalk.yellow('📱 Launching browser...'));
         browser = await launchBrowser(CONFIG.headless);
@@ -75,6 +84,12 @@ async function main() {
         console.error(chalk.red('\n❌ Error:', error.message));
         process.exit(1);
     } finally {
+        // Restore normal sleep settings (if they were changed)
+        if (process.env.PREVENT_SLEEP !== 'false') {
+            console.log(chalk.yellow('🔋 Restoring normal sleep settings...'));
+            restoreSleep();
+        }
+
         if (browser) {
             await browser.close();
             completeProcessing(stats);
