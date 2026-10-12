@@ -25,6 +25,12 @@ Password tidak pernah ditampilkan kembali di dashboard; kosongkan kolom password
 | `start.bat run` | Start dashboard dan langsung menjalankan automation |
 | `start.bat run headless` | Sama, tetapi browser Chrome disembunyikan |
 | `stop.bat` | Hentikan dashboard + automation + Chrome yang sedang berjalan |
+| `update.bat` | Hentikan dashboard, `git pull` versi terbaru dari GitHub (`master`), `npm install`, lalu start lagi |
+| `update.bat norestart` | Update saja tanpa menjalankan dashboard |
+
+## Update
+
+Klik dua kali `update.bat` untuk mengambil versi terbaru. File `.env` (username/password) dan folder `data\` tidak terpengaruh. Jika Anda mengubah file project sendiri dan bentrok dengan update, `update.bat` akan berhenti dengan pesan error dan tidak menimpa perubahan Anda.
 
 ## Ganti Port
 
