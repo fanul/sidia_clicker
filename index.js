@@ -14,6 +14,7 @@ const { login, selectRole } = require('./login');
 const { navigateToNaskahMasuk, processMenusWithBadges } = require('./documents');
 const { createStats, completeProcessing, displaySummary } = require('./stats');
 const { preventSleep, restoreSleep } = require('./keepAwake');
+const { record } = require('./tracker');
 
 // Configuration
 const CONFIG = {
@@ -45,6 +46,8 @@ async function main() {
 
     let browser;
     let stats = createStats();
+    let failed = false;
+    record('run_start');
 
     try {
         // Validate configuration
@@ -82,6 +85,8 @@ async function main() {
 
     } catch (error) {
         console.error(chalk.red('\n❌ Error:', error.message));
+        failed = true;
+        record('run_end', { total: stats.totalProcessed, status: 'error', error: error.message });
         process.exit(1);
     } finally {
         // Restore normal sleep settings (if they were changed)
@@ -93,6 +98,7 @@ async function main() {
         if (browser) {
             await browser.close();
             completeProcessing(stats);
+            if (!failed) record('run_end', { total: stats.totalProcessed, status: 'ok' });
             displaySummary(stats);
             console.log(chalk.cyan('\n✅ Automation completed!\n'));
         }

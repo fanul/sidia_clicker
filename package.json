@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "headless": "node index.js --headless",
-    "debug": "node index.js --debug"
+    "debug": "node index.js --debug",
+    "dashboard": "node server.js"
   },
   "keywords": [
     "automation",
@@ -17,8 +18,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "puppeteer": "^21.0.0",
+    "chalk": "^4.1.2",
+    "chart.js": "^4.5.1",
     "dotenv": "^16.3.1",
-    "chalk": "^4.1.2"
+    "puppeteer": "^21.0.0"
   }
 }

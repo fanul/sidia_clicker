@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIDIA Dashboard</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1c2430; --muted: #6b7686; --line: #e3e7ee;
+    --accent: #2b6cb0; --ok: #2f855a; --err: #c53030; --warn: #b7791f;
+    --logbg: #0f1720; --logtext: #cfe3d4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11161d; --card: #1a212b; --text: #e6ebf2; --muted: #93a0b2; --line: #2a3340;
+      --accent: #63a4ef; --ok: #5fc08a; --err: #f08080; --warn: #e3b25a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .pill { padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; border: 1px solid var(--line); }
+  .pill.running { color: var(--ok); border-color: var(--ok); }
+  .pill.idle { color: var(--muted); }
+  button { font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--err); border-color: var(--err); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  label.chk { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  .kpi .v { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .kpi .l { color: var(--muted); font-size: 13px; }
+  .charts { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); margin-bottom: 14px; }
+  .chart-box { position: relative; height: 280px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .st-ok { color: var(--ok); } .st-error { color: var(--err); } .st-running { color: var(--accent); } .st-interrupted { color: var(--warn); }
+  pre#log { background: var(--logbg); color: var(--logtext); padding: 12px; border-radius: 8px; height: 260px; overflow: auto; margin: 0; font: 12.5px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  @media (max-width: 480px) { .charts { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>SIDIA Automation Dashboard</h1>
+    <div class="controls">
+      <span id="state" class="pill idle">Idle</span>
+      <label class="chk"><input type="checkbox" id="headless"> Headless</label>
+      <button id="run" class="primary">Jalankan</button>
+      <button id="stop" class="danger">Hentikan</button>
+    </div>
+  </header>
+
+  <section class="grid">
+    <div class="card kpi"><div class="v" id="k-total">0</div><div class="l">Total dokumen diproses</div></div>
+    <div class="card kpi"><div class="v" id="k-today">0</div><div class="l">Hari ini</div></div>
+    <div class="card kpi"><div class="v" id="k-runs">0</div><div class="l">Jumlah run</div></div>
+    <div class="card kpi"><div class="v" id="k-menus">0</div><div class="l">Menu terproses</div></div>
+  </section>
+
+  <section class="charts">
+    <div class="card"><h2>Dokumen per menu</h2><div class="chart-box"><canvas id="c-menu"></canvas></div></div>
+    <div class="card"><h2>Dokumen per hari (14 hari)</h2><div class="chart-box"><canvas id="c-day"></canvas></div></div>
+  </section>
+
+  <section class="card" style="margin-bottom:14px">
+    <h2>Riwayat run</h2>
+    <div id="runs"></div>
+  </section>
+
+  <section class="card">
+    <h2>Log</h2>
+    <pre id="log">Belum ada log.</pre>
+  </section>
+</main>
+
+<script src="/vendor/chart.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let menuChart, dayChart, lastKey = '';
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmt(t) { return t ? new Date(t).toLocaleString('id-ID') : '-'; }
+function dur(a, b) {
+  const s = Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 1000);
+  return s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : s + 's';
+}
+
+function last14Days(byDay) {
+  const labels = [], values = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    labels.push(key.slice(5)); values.push(byDay[key] || 0);
+  }
+  return { labels, values };
+}
+
+function drawCharts(s) {
+  const text = css('--muted'), line = css('--line'), accent = css('--accent');
+  const common = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+  const scales = (horizontal) => ({
+    x: { ticks: { color: text, precision: 0 }, grid: { color: horizontal ? line : 'transparent' }, beginAtZero: true },
+    y: { ticks: { color: text, precision: 0 }, grid: { color: horizontal ? 'transparent' : line }, beginAtZero: true }
+  });
+
+  const menus = Object.entries(s.byMenu).sort((a, b) => b[1] - a[1]);
+  if (menuChart) menuChart.destroy();
+  menuChart = new Chart($('c-menu'), {
+    type: 'bar',
+    data: { labels: menus.map(m => m[0]), datasets: [{ data: menus.map(m => m[1]), backgroundColor: accent, borderRadius: 4 }] },
+    options: { ...common, indexAxis: 'y', scales: scales(true) }
+  });
+
+  const d = last14Days(s.byDay);
+  if (dayChart) dayChart.destroy();
+  dayChart = new Chart($('c-day'), {
+    type: 'bar',
+    data: { labels: d.labels, datasets: [{ data: d.values, backgroundColor: accent, borderRadius: 4 }] },
+    options: { ...common, scales: scales(false) }
+  });
+}
+
+function renderRuns(runs) {
+  if (!runs.length) { $('runs').innerHTML = '<div class="empty">Belum ada run.</div>'; return; }
+  $('runs').innerHTML = '<table><thead><tr><th>Mulai</th><th>Durasi</th><th class="num">Dokumen</th><th>Status</th></tr></thead><tbody>' +
+    runs.slice().reverse().map(r =>
+      `<tr><td>${esc(fmt(r.start))}</td><td>${dur(r.start, r.end)}</td><td class="num">${r.docs}</td>` +
+      `<td class="st-${esc(r.status)}">${esc(r.status)}${r.error ? ' - ' + esc(r.error) : ''}</td></tr>`).join('') +
+    '</tbody></table>';
+}
+
+async function refresh() {
+  try {
+    const [s, st] = await Promise.all([fetch('/api/stats').then(r => r.json()), fetch('/api/status').then(r => r.json())]);
+
+    $('k-total').textContent = s.total;
+    $('k-today').textContent = s.today;
+    $('k-runs').textContent = s.runCount;
+    $('k-menus').textContent = Object.keys(s.byMenu).length;
+
+    $('state').textContent = st.running ? 'Berjalan' : 'Idle';
+    $('state').className = 'pill ' + (st.running ? 'running' : 'idle');
+    $('run').disabled = st.running;
+    $('stop').disabled = !st.running;
+
+    const key = JSON.stringify([s.byMenu, s.byDay]);
+    if (key !== lastKey) { lastKey = key; drawCharts(s); renderRuns(s.runs); }
+    else if (st.running) renderRuns(s.runs);
+
+    const log = $('log');
+    const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+    if (st.logs.length) { log.textContent = st.logs.join('\n'); if (atBottom) log.scrollTop = log.scrollHeight; }
+  } catch (e) {
+    $('state').textContent = 'Server tidak terhubung';
+  }
+}
+
+async function post(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  return r.json();
+}
+$('run').onclick = async () => { await post('/api/run', { headless: $('headless').checked }); refresh(); };
+$('stop').onclick = async () => { if (confirm('Hentikan automation yang sedang berjalan?')) { await post('/api/stop'); refresh(); } };
+
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { lastKey = ''; refresh(); });
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

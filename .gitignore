@@ -32,3 +32,6 @@ screenshots/
 # Temp files
 tmp/
 temp/
+
+# Dashboard data
+data/
