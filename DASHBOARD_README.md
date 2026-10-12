@@ -6,6 +6,17 @@ Dashboard web untuk melihat grafik hasil automation dan menjalankan/menghentikan
 - Grafik: dokumen per menu, dokumen per hari (14 hari), riwayat run, log live
 - Data grafik disimpan di `data/events.jsonl` (otomatis tercatat saat automation berjalan, baik lewat dashboard maupun `npm start`)
 
+## Pengaturan (username & password)
+
+Buka panel **Pengaturan** di bagian atas dashboard, isi lalu klik **Simpan**. Nilainya ditulis ke file `.env`:
+
+- Username dan password SIDIA
+- Pesan feedback
+- Kode jenis dokumen
+- Submenu yang dilewati
+
+Password tidak pernah ditampilkan kembali di dashboard; kosongkan kolom password jika tidak ingin mengubahnya. Perubahan berlaku pada run berikutnya, tanpa restart server.
+
 ## Windows
 
 | File | Fungsi |
@@ -35,4 +46,4 @@ npm run dashboard
 
 - Jika automation dihentikan paksa saat berjalan, pengaturan sleep Windows mungkin belum dipulihkan:
   `powercfg /change standby-timeout-ac 30` dan `powercfg /change monitor-timeout-ac 10`.
-- Server hanya listen di `127.0.0.1` (bisa diubah dengan env `HOST`).
+- Server hanya listen di `127.0.0.1` dan hanya menerima akses lewat `localhost`/`127.0.0.1` pada port yang sama, supaya website lain tidak bisa mengubah pengaturan.

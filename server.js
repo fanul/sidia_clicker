@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const { readEvents } = require('./tracker');
+const { getPublicSettings, saveSettings, readValues } = require('./settings');
 
 const PORT = parseInt(process.env.PORT || process.env.DASHBOARD_PORT, 10) || 3333;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -48,7 +49,8 @@ function startAutomation(headless) {
     lastExitCode = null;
     startedAt = new Date();
 
-    const env = { ...process.env };
+    // Re-read .env so settings saved from the dashboard apply without restarting the server
+    const env = { ...process.env, ...readValues() };
     if (headless) env.HEADLESS = 'true';
 
     child = spawn(process.execPath, args, { cwd: __dirname, env });
@@ -160,8 +162,28 @@ function readBody(req) {
     });
 }
 
+/**
+ * Only accept requests meant for this dashboard. Blocks other websites from
+ * calling the local API (cross-site requests and DNS rebinding).
+ */
+function isAllowedRequest(req) {
+    const allowedHosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`];
+    if (!allowedHosts.includes(req.headers.host)) return false;
+    if (req.method === 'POST') {
+        const origin = req.headers.origin;
+        if (origin && !allowedHosts.some(h => origin === `http://${h}`)) return false;
+        if (!(req.headers['content-type'] || '').startsWith('application/json')) return false;
+    }
+    return true;
+}
+
 const server = http.createServer(async (req, res) => {
     const url = req.url.split('?')[0];
+
+    if (!isAllowedRequest(req)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        return res.end('Forbidden');
+    }
 
     if (req.method === 'GET' && (url === '/' || url === '/index.html')) {
         return sendFile(res, path.join(PUBLIC_DIR, 'index.html'), 'text/html; charset=utf-8');
@@ -171,6 +193,17 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url === '/api/stats') return sendJson(res, 200, buildStats());
     if (req.method === 'GET' && url === '/api/status') return sendJson(res, 200, status());
+
+    if (req.method === 'GET' && url === '/api/settings') return sendJson(res, 200, getPublicSettings());
+    if (req.method === 'POST' && url === '/api/settings') {
+        const body = await readBody(req);
+        try {
+            saveSettings(body);
+            return sendJson(res, 200, { ok: true, running: !!child, settings: getPublicSettings() });
+        } catch (e) {
+            return sendJson(res, 400, { ok: false, message: e.message });
+        }
+    }
 
     if (req.method === 'POST' && url === '/api/run') {
         const body = await readBody(req);
