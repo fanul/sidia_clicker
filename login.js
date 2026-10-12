@@ -42,13 +42,13 @@ async function login(page, config) {
 
     // Enter username
     console.log(chalk.gray('  → Entering username...'));
-    await traditionalType(page, SELECTORS.login.username[0], config.username);
-    console.log(chalk.green(`  ✓ Username entered using: ${SELECTORS.login.username[0]}`));
+    const usedUsernameSelector = await typeIntoField(page, SELECTORS.login.username, config.username, 'username');
+    console.log(chalk.green(`  ✓ Username entered using: ${usedUsernameSelector}`));
 
     // Enter password
     console.log(chalk.gray('  → Entering password...'));
-    await traditionalType(page, SELECTORS.login.password[0], config.password);
-    console.log(chalk.green(`  ✓ Password entered using: ${SELECTORS.login.password[0]}`));
+    const usedPasswordSelector = await typeIntoField(page, SELECTORS.login.password, config.password, 'password');
+    console.log(chalk.green(`  ✓ Password entered using: ${usedPasswordSelector}`));
 
     // Click login button
     const loginSuccess = await attemptLogin(page);
@@ -58,6 +58,54 @@ async function login(page, config) {
     }
 
     console.log(chalk.green('  ✓ Login successful'));
+}
+
+/**
+ * Type into the first selector that works and verify the field really holds the text
+ * @param {Page} page - Puppeteer page instance
+ * @param {string[]} selectors - Candidate selectors, tried in order
+ * @param {string} text - Text to type
+ * @param {string} label - Field name for messages (never logs the value)
+ * @returns {Promise<string>} The selector that worked
+ * @throws {Error} If no selector could be filled
+ */
+async function typeIntoField(page, selectors, text, label) {
+    for (const selector of selectors) {
+        const typed = await traditionalType(page, selector, text);
+        if (!typed) {
+            console.log(chalk.gray(`  → ${label}: selector not usable: ${selector}`));
+            continue;
+        }
+
+        const length = await page.$eval(selector, el => el.value.length).catch(() => -1);
+        if (length === text.length) {
+            return selector;
+        }
+        console.log(chalk.yellow(`  ⚠ ${label}: field has ${length} characters after typing, expected ${text.length} (${selector})`));
+    }
+    throw new Error(`Could not fill the ${label} field on the login page (login form may have changed)`);
+}
+
+/**
+ * Read visible error/notification text on the login page (wrong password, locked account, etc.)
+ * @param {Page} page - Puppeteer page instance
+ * @returns {Promise<string[]>} Distinct message texts
+ */
+async function getLoginMessages(page) {
+    try {
+        return await page.evaluate(() => {
+            const nodes = document.querySelectorAll(
+                '.v-alert, [role="alert"], .v-snack__content, .v-messages__message, .error--text, .red--text'
+            );
+            const texts = Array.from(nodes)
+                .filter(n => n.offsetParent !== null)
+                .map(n => (n.textContent || '').replace(/\s+/g, ' ').trim())
+                .filter(t => t.length > 0 && t.length < 200);
+            return Array.from(new Set(texts));
+        });
+    } catch (e) {
+        return [];
+    }
 }
 
 /**
@@ -173,6 +221,11 @@ async function attemptLogin(page) {
                     loginSuccess = true;
                 } else {
                     console.log(chalk.yellow('  → Still on login page, retrying...'));
+                    const messages = await getLoginMessages(page);
+                    if (messages.length > 0) {
+                        console.log(chalk.red(`  ✗ Message on login page: ${messages.join(' | ')}`));
+                        console.log(chalk.yellow('  → Check username/password in the dashboard Pengaturan panel'));
+                    }
                 }
             } else {
                 console.log(chalk.green(`  ✓ Login successful (attempt ${loginAttempts})`));
