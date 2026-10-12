@@ -43,6 +43,13 @@
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .st-ok { color: var(--ok); } .st-error { color: var(--err); } .st-running { color: var(--accent); } .st-interrupted { color: var(--warn); }
   pre#log { background: var(--logbg); color: var(--logtext); padding: 12px; border-radius: 8px; height: 260px; overflow: auto; margin: 0; font: 12.5px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+  details.card summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .form { display: grid; gap: 12px 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 14px; }
+  .form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  .form input[type=text], .form input[type=password] { font: inherit; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); width: 100%; }
+  .form .hint { font-size: 12px; }
+  .form-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+  #set-msg { font-size: 13px; }
   .empty { color: var(--muted); padding: 40px 0; text-align: center; }
   @media (max-width: 480px) { .charts { grid-template-columns: 1fr; } }
 </style>
@@ -58,6 +65,36 @@
       <button id="stop" class="danger">Hentikan</button>
     </div>
   </header>
+
+  <details class="card" id="settings" style="margin-bottom:14px">
+    <summary>Pengaturan</summary>
+    <form id="set-form" autocomplete="off">
+      <div class="form">
+        <label>Username SIDIA
+          <input type="text" id="s-user" autocomplete="off" spellcheck="false">
+        </label>
+        <label>Password SIDIA
+          <input type="password" id="s-pass" autocomplete="new-password">
+          <span class="hint" id="s-pass-hint"></span>
+        </label>
+        <label>Pesan feedback
+          <input type="text" id="s-feedback">
+        </label>
+        <label>Kode jenis dokumen
+          <input type="text" id="s-types" spellcheck="false">
+          <span class="hint">Pisahkan dengan koma, contoh: NKH0002,NKH0001</span>
+        </label>
+        <label>Submenu yang dilewati
+          <input type="text" id="s-skip" spellcheck="false">
+          <span class="hint">Opsional, pisahkan dengan koma</span>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="primary">Simpan</button>
+        <span id="set-msg"></span>
+      </div>
+    </form>
+  </details>
 
   <section class="grid">
     <div class="card kpi"><div class="v" id="k-total">0</div><div class="l">Total dokumen diproses</div></div>
@@ -172,7 +209,44 @@ async function post(url, body) {
 $('run').onclick = async () => { await post('/api/run', { headless: $('headless').checked }); refresh(); };
 $('stop').onclick = async () => { if (confirm('Hentikan automation yang sedang berjalan?')) { await post('/api/stop'); refresh(); } };
 
+async function loadSettings() {
+  try {
+    const s = await fetch('/api/settings').then(r => r.json());
+    $('s-user').value = s.SIDIA_USERNAME;
+    $('s-pass').value = '';
+    $('s-pass-hint').textContent = s.passwordSet ? 'Sudah tersimpan. Kosongkan jika tidak ingin mengubah.' : 'Belum diisi.';
+    $('s-feedback').value = s.FEEDBACK_MESSAGE;
+    $('s-types').value = s.DOCUMENT_TYPES;
+    $('s-skip').value = s.SKIP_SUBMENUS;
+    if (!s.SIDIA_USERNAME || !s.passwordSet) $('settings').open = true;
+  } catch (e) {}
+}
+
+$('set-form').onsubmit = async e => {
+  e.preventDefault();
+  const msg = $('set-msg');
+  msg.style.color = '';
+  try {
+    const r = await post('/api/settings', {
+      SIDIA_USERNAME: $('s-user').value,
+      SIDIA_PASSWORD: $('s-pass').value,
+      FEEDBACK_MESSAGE: $('s-feedback').value,
+      DOCUMENT_TYPES: $('s-types').value,
+      SKIP_SUBMENUS: $('s-skip').value
+    });
+    if (!r.ok) throw new Error(r.message || 'Gagal menyimpan');
+    msg.style.color = css('--ok');
+    msg.textContent = r.running ? 'Tersimpan. Berlaku pada run berikutnya.' : 'Tersimpan.';
+    $('s-pass').value = '';
+    $('s-pass-hint').textContent = r.settings.passwordSet ? 'Sudah tersimpan. Kosongkan jika tidak ingin mengubah.' : 'Belum diisi.';
+  } catch (err) {
+    msg.style.color = css('--err');
+    msg.textContent = err.message;
+  }
+};
+
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { lastKey = ''; refresh(); });
+loadSettings();
 refresh();
 setInterval(refresh, 3000);
 </script>
