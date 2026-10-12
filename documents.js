@@ -8,6 +8,7 @@ const { retry, sleep } = require('./utils');
 const { SELECTORS, TIMING } = require('./constants');
 const { clickButtonByText, waitForAnySelector } = require('./pageHelper');
 const { clickAndVerifyWithFallback } = require('./visualHelper');
+const { record } = require('./tracker');
 
 // Import new modular components
 const { clickSubmenu } = require('./submenuNavigation');
@@ -711,6 +712,7 @@ async function processDocumentsFromTable(page, menu, config) {
 
         if (processed) {
             processedCount++;
+            record('doc', { menu: menu.text });
             console.log(chalk.green(`    ✓ Document ${processedCount} processed successfully`));
 
             // After successful processing, check if there are more documents
