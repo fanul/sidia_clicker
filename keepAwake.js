@@ -23,7 +23,8 @@ function preventSleep() {
     commands.forEach(cmd => {
         exec(cmd, (error) => {
             if (error) {
-                console.error(chalk.red(`✗ Failed to execute: ${cmd}`));
+                // Sering dibatasi oleh Group Policy laptop kantor / non-admin, bukan error fatal
+                console.log(chalk.gray(`ℹ Power policy notice: ${cmd} (dilewati karena kebijakan sistem)`));
             } else {
                 console.log(chalk.green(`✓ Executed: ${cmd}`));
             }

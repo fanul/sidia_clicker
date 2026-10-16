@@ -1,0 +1,359 @@
+/* Cybernetic HUD AI Core (JEV System One Reference) */
+  .ai-animation-box {
+    background: #06070a;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    box-shadow: 0 10px 36px -4px rgba(0, 0, 0, 0.9), 0 0 24px -2px rgba(239, 68, 68, 0.18);
+    border-radius: 16px;
+    padding: 14px 16px 12px 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    min-height: 410px;
+    overflow: hidden;
+    color: #e2e8f0;
+    font-family: var(--font-mono);
+    user-select: none;
+    transition: all 0.4s ease;
+  }
+
+  /* Cyber Grid Background */
+  .ai-animation-box::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: 
+      linear-gradient(rgba(239, 68, 68, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(239, 68, 68, 0.05) 1px, transparent 1px);
+    background-size: 20px 20px;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Top Sci-Fi Header Ribbon */
+  .cyber-top-bar {
+    position: relative;
+    z-index: 5;
+    border-bottom: 1px solid rgba(239, 68, 68, 0.22);
+    padding-bottom: 8px;
+  }
+  .cyber-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+  .cyber-title-main {
+    font-weight: 800;
+    color: #f87171;
+    text-transform: uppercase;
+    text-shadow: 0 0 8px rgba(248, 113, 113, 0.6);
+  }
+  .cyber-title-code {
+    font-size: 9.5px;
+    color: #71717a;
+  }
+  .cyber-title-sub {
+    font-size: 9.5px;
+    color: #ef4444;
+    opacity: 0.85;
+    margin-top: 1px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .cyber-stats-ribbon {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 5px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.08);
+    font-size: 9px;
+  }
+  .cs-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .cs-k {
+    color: #71717a;
+    font-size: 8px;
+    letter-spacing: 0.05em;
+  }
+  .cs-v {
+    color: #f87171;
+    font-weight: 700;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .cs-v.amber { color: #f59e0b; }
+  .cs-v.emerald { color: #10b981; }
+
+  /* Central Viewport for Swirling Particle Nebula */
+  .cyber-viewport {
+    position: relative;
+    width: 100%;
+    height: 255px;
+    margin: 6px 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3;
+    border-radius: 10px;
+    background: radial-gradient(circle at center, rgba(239, 68, 68, 0.08) 0%, transparent 70%);
+  }
+  #cyber-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+  }
+
+  /* Corner Framing Brackets */
+  .corner-bracket {
+    position: absolute;
+    font-size: 18px;
+    line-height: 1;
+    font-weight: 300;
+    color: rgba(239, 68, 68, 0.7);
+    z-index: 6;
+    pointer-events: none;
+    text-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+  }
+  .cb-tl { top: 6px; left: 8px; }
+  .cb-tr { top: 6px; right: 8px; }
+  .cb-bl { bottom: 6px; left: 8px; }
+  .cb-br { bottom: 6px; right: 8px; }
+  .bracket-tag-bl {
+    position: absolute;
+    bottom: 9px; left: 24px;
+    font-size: 8.5px;
+    color: #ef4444;
+    letter-spacing: 0.06em;
+    z-index: 6;
+    opacity: 0.85;
+    font-weight: 600;
+  }
+
+  /* Horizontal Laser Scan Lines */
+  .laser-scan-grid {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+  }
+  .laser-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(239, 68, 68, 0.25) 15%, rgba(239, 68, 68, 0.85) 50%, rgba(239, 68, 68, 0.25) 85%, transparent 100%);
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.45);
+  }
+  .laser-line.line-1 { top: 28%; opacity: 0.65; }
+  .laser-line.line-2 { top: 50%; opacity: 0.85; }
+  .laser-line.line-3 { top: 72%; opacity: 0.65; }
+  .laser-sweep-beam {
+    position: absolute;
+    left: 0; right: 0;
+    height: 2.5px;
+    background: linear-gradient(90deg, transparent, rgba(239, 68, 68, 0.95), transparent);
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.9);
+    animation: laser-sweep 4s ease-in-out infinite alternate;
+  }
+  @keyframes laser-sweep {
+    0% { top: 12%; opacity: 0.25; }
+    50% { opacity: 0.9; }
+    100% { top: 88%; opacity: 0.25; }
+  }
+
+  /* SVG HUD Reticle Overlay */
+  .cyber-svg-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .svg-ring-outer {
+    fill: none;
+    stroke: rgba(239, 68, 68, 0.35);
+    stroke-width: 1.2;
+    transform-origin: 160px 127px;
+    animation: orb-rotate 35s linear infinite;
+  }
+  .svg-ring-outer-solid {
+    fill: none;
+    stroke: rgba(239, 68, 68, 0.18);
+    stroke-width: 0.75;
+  }
+  .svg-ring-mid {
+    fill: none;
+    stroke: rgba(245, 158, 11, 0.35);
+    stroke-width: 1;
+    transform-origin: 160px 127px;
+    animation: orb-rotate-reverse 18s linear infinite;
+  }
+  .svg-target-ring {
+    fill: none;
+    stroke: rgba(239, 68, 68, 0.75);
+    stroke-width: 1.2;
+    transform-origin: 160px 127px;
+    animation: reticle-pulse 2s ease-in-out infinite alternate;
+  }
+  .svg-target-inner {
+    fill: rgba(239, 68, 68, 0.15);
+    stroke: rgba(245, 158, 11, 0.85);
+    stroke-width: 1;
+  }
+  @keyframes reticle-pulse {
+    0% { r: 24; opacity: 0.5; }
+    100% { r: 30; opacity: 1; }
+  }
+  .svg-crosshair {
+    stroke: rgba(239, 68, 68, 0.8);
+    stroke-width: 1;
+  }
+  .svg-center-dot {
+    fill: #ef4444;
+    filter: drop-shadow(0 0 5px #ef4444);
+  }
+  .leader-line {
+    fill: none;
+    stroke: rgba(239, 68, 68, 0.5);
+    stroke-width: 1;
+    stroke-dasharray: 2, 2;
+  }
+
+  /* Floating Telemetry Nodes / Badges ("biar ramai") */
+  .hud-node {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(10, 12, 18, 0.88);
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 8.5px;
+    color: #e2e8f0;
+    z-index: 6;
+    letter-spacing: 0.04em;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+    transition: all 0.25s ease;
+  }
+  .node-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #ef4444;
+    box-shadow: 0 0 6px #ef4444;
+    animation: status-ping 1.8s infinite;
+  }
+  .node-dot.amber { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+  .node-dot.cyan { background: #06b6d4; box-shadow: 0 0 6px #06b6d4; }
+  .node-dot.emerald { background: #10b981; box-shadow: 0 0 6px #10b981; }
+
+  .node-tl { top: 16px; left: 14px; }
+  .node-tr { top: 16px; right: 14px; }
+  .node-mr { top: 48%; right: 10px; }
+  .node-bl { bottom: 20px; left: 16px; }
+
+  /* Signature Core Heat Callout Box from Reference */
+  .hud-heat-box {
+    position: absolute;
+    top: 36%;
+    left: 12px;
+    background: rgba(12, 14, 20, 0.92);
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.25);
+    border-radius: 4px;
+    padding: 4px 8px;
+    z-index: 7;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 95px;
+  }
+  .hh-title {
+    font-size: 8.5px;
+    font-weight: 800;
+    color: #ef4444;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .hh-sub {
+    font-size: 7.5px;
+    color: #71717a;
+  }
+  .hh-bar {
+    width: 100%;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    margin-top: 2px;
+    overflow: hidden;
+  }
+  .hh-bar-fill {
+    width: 24%;
+    height: 100%;
+    background: linear-gradient(90deg, #ef4444, #f59e0b);
+    transition: width 0.3s;
+  }
+
+  /* Bottom Sci-Fi Footer Ribbon */
+  .cyber-bottom-bar {
+    position: relative;
+    z-index: 5;
+    border-top: 1px solid rgba(239, 68, 68, 0.22);
+    padding-top: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 8.5px;
+    letter-spacing: 0.04em;
+    color: #71717a;
+  }
+  .cbb-left {
+    color: #ef4444;
+    font-weight: 600;
+    opacity: 0.85;
+  }
+
+  /* Progress Mini Bar inside Cyber Box */
+  .ai-box-progress {
+    width: 100%;
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    z-index: 5;
+    position: relative;
+  }
+  .ai-progress-bar-bg {
+    height: 5px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+  .ai-progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #ef4444 0%, #f97316 50%, #f59e0b 100%);
+    border-radius: 999px;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
+    transition: width 0.4s ease;
+  }
+  .ai-progress-text-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: #a1a1aa;
+    letter-spacing: 0.04em;
+  }

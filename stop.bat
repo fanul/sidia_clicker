@@ -4,9 +4,10 @@ cd /d "%~dp0"
 title SIDIA Dashboard - Stop
 
 rem ============================================================
-rem  SIDIA Dashboard - stop
-rem  Stops the process listening on the dashboard port together
-rem  with its child processes (automation + browser).
+rem  SIDIA Dashboard & Chrome Port 9222 - Stop
+rem  Menghentikan server dashboard (Port 3333), otomasi,
+rem  dan proses orphan Google Chrome di Port 9222 serta
+rem  membersihkan file lock profil secara tuntas.
 rem ============================================================
 
 set "APP_PORT=3333"
@@ -17,21 +18,26 @@ if exist ".env" (
 )
 set "APP_PORT=%APP_PORT: =%"
 
-set "FOUND="
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr /R /C:":%APP_PORT% .*LISTENING"') do (
-    set "FOUND=1"
-    echo [INFO] Menghentikan proses PID %%p di port %APP_PORT% ...
+echo [1/3] Memeriksa proses di Port Dashboard (%APP_PORT%)...
+set "FOUND_APP="
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%APP_PORT%" ^| findstr "LISTENING"') do (
+    set "FOUND_APP=1"
+    echo [INFO] Menghentikan proses Dashboard PID %%p di port %APP_PORT% ...
     taskkill /PID %%p /T /F >nul 2>&1
 )
-
-if not defined FOUND (
+if not defined FOUND_APP (
     echo [INFO] Tidak ada proses yang berjalan di port %APP_PORT%.
-    exit /b 0
 )
 
-echo [OK] Dashboard dihentikan.
-echo [INFO] Jika automation sedang berjalan saat dihentikan, setting sleep Windows mungkin belum dipulihkan:
-echo        powercfg /change standby-timeout-ac 30
-echo        powercfg /change monitor-timeout-ac 10
+echo [2/3] Memeriksa proses Google Chrome orphan (Port 9222 & Otomasi)...
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*--remote-debugging-port=9222*' -or $_.CommandLine -like '*AutomationProfile*' -or $_.CommandLine -like '*browser-profile*' } | ForEach-Object { Write-Host '[INFO] Menghentikan Chrome orphan PID' $_.ProcessId; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+
+echo [3/3] Membersihkan file lock profil Chrome...
+set "PROFILE_DIR=%LOCALAPPDATA%\Google\Chrome\AutomationProfile"
+if exist "%PROFILE_DIR%\lockfile" del /f /q "%PROFILE_DIR%\lockfile" >nul 2>&1
+if exist "%PROFILE_DIR%\LOCK" del /f /q "%PROFILE_DIR%\LOCK" >nul 2>&1
+if exist "%PROFILE_DIR%\Default\LOCK" del /f /q "%PROFILE_DIR%\Default\LOCK" >nul 2>&1
+echo [OK] Pembersihan selesai. Semua server dan orphan Chrome telah dihentikan.
+
 endlocal
 exit /b 0

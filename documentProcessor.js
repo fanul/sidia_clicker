@@ -54,10 +54,16 @@ async function findButtonSmart(page, options) {
                     if (mustBeVisible && !isVisible) continue;
                     if (mustBeEnabled && !isEnabled) continue;
 
-                    // Check text match
-                    const textMatches = searchType === 'exact'
-                        ? text === buttonText
-                        : text.includes(buttonText);
+                    // Check text match (hindari 'Feedback Staff Lainnya' jika mencari 'Feedback')
+                    const lowerText = text.toLowerCase();
+                    let textMatches = false;
+                    if (buttonText === 'Feedback' && (lowerText.includes('staff lainnya') || lowerText.includes('staf lainnya'))) {
+                        textMatches = false;
+                    } else if (searchType === 'exact') {
+                        textMatches = text === buttonText;
+                    } else {
+                        textMatches = text.includes(buttonText);
+                    }
 
                     if (textMatches) {
                         return {
@@ -96,12 +102,12 @@ async function findButtonSmart(page, options) {
  * @param {Object} config - Configuration object
  * @returns {Promise<boolean>} True if processed successfully
  */
-async function processSingleDocument(page, config) {
+async function processSingleDocument(page, config, targetIndex = 0) {
     try {
-        console.log(chalk.gray('      📄 Processing document...'));
+        console.log(chalk.gray(`      📄 Processing document (baris: ${targetIndex + 1})...`));
 
         // STEP 1: Click "Lihat" button
-        const lihatResult = await clickLihatButton(page);
+        const lihatResult = await clickLihatButton(page, targetIndex);
         if (!lihatResult.success) {
             return false;
         }
@@ -140,7 +146,9 @@ async function processSingleDocument(page, config) {
                 const buttons = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
                 const feedbackBtn = buttons.find(btn => {
                     const text = (btn.textContent || '').trim();
-                    return text.includes('Feedback') && btn.offsetParent !== null && !btn.disabled;
+                    const lower = text.toLowerCase();
+                    const isOtherStaff = lower.includes('staff lainnya') || lower.includes('staf lainnya');
+                    return !isOtherStaff && (lower === 'feedback' || lower === 'beri feedback' || lower.startsWith('feedback')) && btn.offsetParent !== null && !btn.disabled;
                 });
 
                 if (feedbackBtn) {
@@ -207,7 +215,9 @@ async function processSingleDocument(page, config) {
             const buttons = Array.from(document.querySelectorAll('button, .v-btn'));
             for (const btn of buttons) {
                 const btnText = (btn.textContent || '').trim();
-                if (btnText.includes('Feedback') && btn.offsetParent !== null && !btn.disabled) {
+                const lower = btnText.toLowerCase();
+                const isOtherStaff = lower.includes('staff lainnya') || lower.includes('staf lainnya');
+                if (!isOtherStaff && (lower === 'feedback' || lower === 'beri feedback' || lower.startsWith('feedback')) && btn.offsetParent !== null && !btn.disabled) {
                     // Get button position for Vue.js events
                     const rect = btn.getBoundingClientRect();
 
@@ -491,23 +501,27 @@ async function processSingleDocument(page, config) {
 
         // Wait for confirmation dialog to close and Kembali button to appear
         console.log(chalk.gray('      → Waiting for confirmation dialog to close...'));
-        await sleep(3000);
+        let dialogClosed = false;
+        for (let i = 0; i < 6; i++) {
+            await sleep(1500);
+            const isModalActive = await page.evaluate(() => {
+                const activeDialogs = Array.from(document.querySelectorAll('.v-dialog--active, [role="dialog"]')).filter(d => {
+                    const style = window.getComputedStyle(d);
+                    return style.display !== 'none' && style.visibility !== 'hidden' && d.offsetParent !== null;
+                });
+                return activeDialogs.length > 0;
+            });
 
-        // Check if dialog is still open
-        const dialogCheck = await page.evaluate(() => {
-            const dialogs = document.querySelectorAll('[role="dialog"], .v-dialog, .v-card');
-            return {
-                dialogCount: dialogs.length,
-                dialogVisible: Array.from(dialogs).some(d => d.offsetParent !== null)
-            };
-        });
+            if (!isModalActive) {
+                dialogClosed = true;
+                console.log(chalk.green('      ✓ Confirmation dialog closed'));
+                break;
+            }
+            console.log(chalk.yellow(`      → Dialog still visible, waiting (${i + 1}/6)...`));
+        }
 
-        console.log(chalk.gray(`      → Dialog state: ${dialogCheck.dialogCount} dialogs, visible: ${dialogCheck.dialogVisible}`));
-
-        // If dialog still visible, wait a bit more
-        if (dialogCheck.dialogVisible) {
-            console.log(chalk.yellow('      → Dialog still visible, waiting longer...'));
-            await sleep(2000);
+        if (!dialogClosed) {
+            console.log(chalk.yellow('      ⚠ Dialog may still be closing or closed, continuing to look for Kembali...'));
         }
 
         // STEP 8: Click Kembali button with enhanced search
@@ -614,18 +628,27 @@ async function processSingleDocument(page, config) {
                     }
                 }
 
-                // Strategy 2: Try Puppeteer's direct click using text selector
+                // Strategy 2: Try click using Puppeteer evaluate on text
                 if (!navigationSuccessful) {
                     try {
                         console.log(chalk.gray('      → Strategy 2: Text click...'));
-                        await page.click(`:text("${buttonSearch.text}")`, { timeout: 5000 });
-                        await sleep(2000);
+                        const clicked = await page.evaluate((targetText) => {
+                            const btns = Array.from(document.querySelectorAll('button, .v-btn, a'));
+                            const match = btns.find(b => (b.textContent || '').trim().includes(targetText) && b.offsetParent !== null);
+                            if (match) {
+                                match.click();
+                                return true;
+                            }
+                            return false;
+                        }, buttonSearch.text);
 
-                        // Check if URL changed
-                        const newUrl = page.url();
-                        if (newUrl !== buttonSearch.currentUrl) {
-                            navigationSuccessful = true;
-                            console.log(chalk.green('      ✓ Text click success'));
+                        if (clicked) {
+                            await sleep(2000);
+                            const newUrl = page.url();
+                            if (newUrl !== buttonSearch.currentUrl) {
+                                navigationSuccessful = true;
+                                console.log(chalk.green('      ✓ Text click success'));
+                            }
                         }
                     } catch (e) {
                         console.log(chalk.yellow(`      → Text click failed: ${e.message}`));
@@ -940,8 +963,8 @@ async function clickButtonSmart(buttonText, page) {
  * @param {Page} page - Puppeteer page instance
  * @returns {Promise<Object>} Result object
  */
-async function clickLihatButton(page) {
-    console.log(chalk.gray('🔍 Starting Lihat button search...'));
+async function clickLihatButton(page, targetIndex = 0) {
+    console.log(chalk.gray(`🔍 Starting Lihat button search (targetIndex: ${targetIndex})...`));
 
     const debugInfo = await page.evaluate(() => {
         const debug = {
@@ -993,37 +1016,64 @@ async function clickLihatButton(page) {
     // Production: Minimal debug output
     console.log(chalk.gray(`🔍 Lihat search: ${debugInfo.lihatButtonsFound.length} buttons found`));
 
-    // Now click the FIRST Lihat button directly using Puppeteer
+    // Now click the target Lihat button
     if (debugInfo.activeWindowExists && debugInfo.lihatButtonsFound.length > 0) {
-        console.log(chalk.gray(`✅ Clicking first Lihat button...`));
+        if (targetIndex >= debugInfo.lihatButtonsFound.length) {
+            console.log(chalk.yellow(`⚠ Requested document index ${targetIndex} out of bounds (${debugInfo.lihatButtonsFound.length} available)`));
+            return { success: false, reason: 'index_out_of_bounds' };
+        }
+
+        console.log(chalk.gray(`✅ Clicking Lihat button at index ${targetIndex}...`));
 
         try {
-            // Use Puppeteer's direct page.click() with CSS selector
-            const firstButtonSelector = '.v-window-item--active button.v-btn';
-            await page.click(firstButtonSelector, { clickCount: 1, delay: 200 });
-            console.log(chalk.green('✅ Lihat button clicked'));
+            const clickSuccess = await page.evaluate((idx) => {
+                const activeWindow = document.querySelector('.v-window-item--active') || document;
+                const buttons = Array.from(activeWindow.querySelectorAll('button, .v-btn'));
+                const lihatButtons = buttons.filter(btn => {
+                    const text = (btn.textContent || '').trim();
+                    const isVisible = btn.offsetParent !== null;
+                    const isEnabled = !btn.disabled && !btn.classList.contains('v-btn--disabled');
+                    return text.includes('Lihat') && isVisible && isEnabled;
+                });
 
-            // Wait for the feedback section to appear
-            await sleep(2000);
+                if (idx < lihatButtons.length) {
+                    lihatButtons[idx].scrollIntoView({ behavior: 'instant', block: 'center' });
+                    lihatButtons[idx].click();
+                    return true;
+                }
+                return false;
+            }, targetIndex);
+
+            if (!clickSuccess) {
+                console.log(chalk.red(`❌ Failed to click Lihat button at index ${targetIndex}`));
+                return { success: false, reason: 'click_failed' };
+            }
+
+            console.log(chalk.green(`✅ Lihat button at index ${targetIndex} clicked`));
+
+            // Wait for navigation / modal to appear
+            await sleep(2500);
 
             // Verify the click worked
             const afterClickState = await page.evaluate(() => {
                 const textarea = document.querySelector('textarea');
-                const dialog = document.querySelector('[role="dialog"]');
+                const dialog = document.querySelector('[role="dialog"], .v-dialog--active');
                 const card = document.querySelector('.v-card');
+                const isDetailUrl = window.location.href.includes('/inbox/') && window.location.href.includes('?obj=');
                 return {
                     hasTextarea: textarea !== null,
                     hasDialog: dialog !== null,
-                    hasCard: card !== null
+                    hasCard: card !== null,
+                    isDetailUrl
                 };
             });
 
             console.log('🔍 After click state:', afterClickState);
 
-            const success = afterClickState.hasTextarea || afterClickState.hasDialog || afterClickState.hasCard;
+            const success = afterClickState.hasTextarea || afterClickState.hasDialog || afterClickState.hasCard || afterClickState.isDetailUrl;
 
             if (success) {
-                console.log('✅ Lihat button click verified - feedback section appeared');
+                console.log('✅ Lihat button click verified - feedback/detail section appeared');
                 return { success: true };
             } else {
                 console.log('❌ Lihat button clicked but feedback section not visible');

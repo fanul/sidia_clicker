@@ -8,6 +8,7 @@ yarn.lock
 
 # Session data
 .session/
+browser-profile/
 
 # Logs
 logs/
@@ -35,3 +36,6 @@ temp/
 
 # Dashboard data
 data/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

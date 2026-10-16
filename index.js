@@ -16,6 +16,14 @@ const { createStats, completeProcessing, displaySummary } = require('./stats');
 const { preventSleep, restoreSleep } = require('./keepAwake');
 const { record } = require('./tracker');
 
+// Catch any unhandled errors and print them so they appear in dashboard logs
+process.on('uncaughtException', err => {
+    console.error(chalk.red(`\n💥 UNCAUGHT EXCEPTION: ${err && err.stack ? err.stack : err}`));
+});
+process.on('unhandledRejection', reason => {
+    console.error(chalk.red(`\n💥 UNHANDLED REJECTION: ${reason && reason.stack ? reason.stack : reason}`));
+});
+
 // Configuration
 const CONFIG = {
     username: process.env.SIDIA_USERNAME,
@@ -23,9 +31,9 @@ const CONFIG = {
     baseUrl: process.env.SIDIA_BASE_URL || 'https://sidia.bpjsketenagakerjaan.go.id',
     timeout: parseInt(process.env.TIMEOUT) || 30000,
     retryAttempts: parseInt(process.env.RETRY_ATTEMPTS) || 10,
-    retryDelay: parseInt(process.env.RETRY_DELAY) || 3000,
-    headless: process.env.HEADLESS === 'true' || process.env.HEADLESS === 'True' || process.env.HEADLESS === 'TRUE',
-    feedbackMessage: process.env.FEEDBACK_MESSAGE || 'dipedomani dan dilaksanakan',
+    headless: process.argv.includes('--headless') ? true : 
+              (process.argv.includes('--no-headless') ? false : 
+              (process.env.HEADLESS === 'true' || process.env.HEADLESS === 'True' || process.env.HEADLESS === 'TRUE')),
     documentTypes: (process.env.DOCUMENT_TYPES || 'NKH0002,NKH0001,NKH0016,NKH0017').split(','),
     clearSessionBeforeRole: process.env.CLEAR_SESSION_BEFORE_ROLE !== 'false', // Default: true
     enableScreenshots: process.env.ENABLE_SCREENSHOTS === 'true', // Default: false (disabled)
@@ -96,7 +104,11 @@ async function main() {
         }
 
         if (browser) {
-            await browser.close();
+            if (browser._isConnectedBrowser) {
+                await browser.disconnect();
+            } else {
+                await browser.close();
+            }
             completeProcessing(stats);
             if (!failed) record('run_end', { total: stats.totalProcessed, status: 'ok' });
             displaySummary(stats);

@@ -7,14 +7,14 @@ const SELECTORS = {
     // Login selectors
     login: {
         username: [
-            'input[id="input-15"]',
+            'input[type="text"]',
             'input[name="username"]',
-            'input[type="text"]'
+            'input[id="input-15"]'
         ],
         password: [
+            'input[type="password"]',
             'input[id="password"]',
-            'input[name="password"]',
-            'input[type="password"]'
+            'input[name="password"]'
         ],
         submitButton: [
             'button[type="submit"]',
@@ -90,7 +90,7 @@ const TIMING = {
 
 // Retry limits
 const RETRY_LIMITS = {
-    LOGIN_ATTEMPTS: 5,
+    LOGIN_ATTEMPTS: 20,
     PILIH_ATTEMPTS: 10,
     DEFAULT_RETRY: 10
 };
@@ -104,17 +104,15 @@ const VIEWPORT = {
 // User agent string
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// Browser launch arguments
+// Browser launch arguments - optimized to avoid bot detection & allow WebGL
 const BROWSER_ARGS = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
-    '--disable-accelerated-2d-canvas',
-    '--disable-gpu',
+    '--disable-blink-features=AutomationControlled',
     '--window-size=1280,800',
     '--disable-notifications',
     '--disable-infobars',
-    '--disable-extensions',
     '--disable-popup-blocking',
     '--disable-save-password-bubble',
     '--disable-translate'

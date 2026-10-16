@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Decision Grid — Body Animation</title>
+<style>
+  :root { --acc: #ff6a2b; --acc-rgb: 255,106,43; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: #03040a; overflow: hidden; }
+  body { display: grid; place-items: center; font-family: "Segoe UI", system-ui, sans-serif; }
+
+  /* ===== stage (the "body" card) ===== */
+  .stage {
+    position: relative;
+    width: min(96vw, calc(96vh * 1.25));
+    aspect-ratio: 5 / 4;
+    border-radius: 14px;
+    overflow: hidden;
+    isolation: isolate;
+    container-type: inline-size;
+    background: radial-gradient(120% 90% at 50% 40%, #12152c 0%, #080913 58%, #04050a 100%);
+    border: 1px solid rgba(255,255,255,.09);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.7), 0 30px 80px rgba(0,0,0,.75), 0 0 70px rgba(var(--acc-rgb), .14);
+    transition: box-shadow 1s;
+    cursor: pointer;
+  }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #fg { mix-blend-mode: screen; }
+  .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+
+  /* ===== node cards (world space, scaled by the camera) ===== */
+  .card {
+    position: absolute; width: 300px; height: 150px; padding: 14px 16px;
+    border-radius: 8px;
+    background: linear-gradient(180deg, rgba(25,28,48,.93), rgba(11,13,25,.93));
+    border: 1.5px solid rgba(150,165,255,.16);
+    font: 500 15px/1.35 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    color: #8f97b8;
+    transition: border-color .45s, box-shadow .7s, background .7s, color .5s;
+  }
+  .card h4 {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    font: 700 19px/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #dfe4ff;
+    white-space: nowrap;
+  }
+  .card h4::before { content: ""; width: 9px; height: 9px; border-radius: 2px; background: #6e78ff; flex: none; transition: background .5s; }
+  .card .tag { margin-left: auto; font: 500 12px ui-monospace, Consolas, monospace; color: #6f7899; }
+  .kv { display: flex; justify-content: space-between; font-size: 14px; line-height: 1.45; }
+  .kv i { font-style: normal; color: #5f6788; }
+  .kv b { color: #aab3d9; font-weight: 500; }
+  .bar { height: 5px; margin-top: 9px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,.07); }
+  .bar u { display: block; height: 100%; background: linear-gradient(90deg, #4b57ff, #9a6bff); }
+  .chip { display: none; margin-top: 8px; padding: 4px 8px; border-radius: 4px; font-size: 14px; color: #fff;
+          background: rgba(var(--acc-rgb), .25); border: 1px solid rgba(var(--acc-rgb), .7); }
+  .card.hot {
+    border-color: rgb(var(--acc-rgb));
+    background: linear-gradient(180deg, rgba(var(--acc-rgb), .24), rgba(var(--acc-rgb), .06)), rgba(10,10,18,.95);
+    color: #ffe9dd;
+    box-shadow: 0 0 0 1px rgba(var(--acc-rgb), .6), 0 0 36px rgba(var(--acc-rgb), .55),
+                0 0 90px rgba(var(--acc-rgb), .28), inset 0 0 28px rgba(var(--acc-rgb), .2);
+    animation: pulse 1.7s ease-in-out infinite;
+  }
+  .card.hot h4::before { background: rgb(var(--acc-rgb)); box-shadow: 0 0 10px rgb(var(--acc-rgb)); }
+  .card.hot .bar { display: none; }
+  .card.hot .chip { display: block; }
+  .card.hot .kv b { color: #fff; }
+  @keyframes pulse {
+    50% { box-shadow: 0 0 0 1px rgba(var(--acc-rgb), .9), 0 0 56px rgba(var(--acc-rgb), .8),
+                      0 0 130px rgba(var(--acc-rgb), .4), inset 0 0 36px rgba(var(--acc-rgb), .3); }
+  }
+  .colhead {
+    position: absolute; width: 300px; padding-bottom: 8px;
+    font: 600 17px ui-monospace, Consolas, monospace; letter-spacing: .14em; color: #59618a;
+    border-bottom: 1px solid rgba(120,135,220,.22);
+  }
+
+  /* ===== overlays ===== */
+  .vig { position: absolute; inset: 0; pointer-events: none;
+         background: radial-gradient(ellipse at 50% 50%, transparent 52%, rgba(0,0,0,.7) 100%),
+                     linear-gradient(to bottom, rgba(4,5,12,.9) 0%, rgba(4,5,12,.45) 14%, transparent 28%),
+                     linear-gradient(to top, rgba(4,5,12,.8) 0%, transparent 16%); }
+  .flash { position: absolute; inset: 0; pointer-events: none; opacity: 0;
+           background: radial-gradient(circle at 50% 45%, rgba(var(--acc-rgb), .45), rgba(255,255,255,.1) 60%, transparent 80%); }
+  .flash.go { animation: flash .7s ease-out; }
+  @keyframes flash { 0% { opacity: .9; } 100% { opacity: 0; } }
+
+  .hud { position: absolute; left: 3.2cqw; right: 3.2cqw; top: 2.6cqw; pointer-events: none; display: flex; justify-content: space-between; align-items: flex-start; }
+  .hud .left { min-width: 0; }
+  .row1 { display: flex; align-items: center; gap: 1.6cqw; }
+  .badge {
+    padding: .5cqw 1.4cqw; border-radius: .5cqw; white-space: nowrap;
+    font: 800 clamp(9px, 1.9cqw, 18px) ui-monospace, Consolas, monospace; letter-spacing: .04em; color: #1a0f08;
+    background: rgb(var(--acc-rgb)); box-shadow: 0 0 2cqw rgba(var(--acc-rgb), .6);
+    transition: background .4s, box-shadow .4s;
+  }
+  .title { font: 800 clamp(13px, 3.7cqw, 40px)/1 "Segoe UI", "Arial Black", system-ui, sans-serif; letter-spacing: .01em; color: #fff;
+           text-shadow: 0 0 2.4cqw rgba(var(--acc-rgb), .5); white-space: nowrap; }
+  .title.in { animation: tin .75s cubic-bezier(.2,.8,.2,1); }
+  @keyframes tin { from { opacity: 0; transform: translateY(.9cqw); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+  .rule { position: relative; height: 2px; margin: 1.1cqw 0 .9cqw; width: 0; max-width: 100%;
+          background: linear-gradient(90deg, rgb(var(--acc-rgb)), rgba(var(--acc-rgb), 0));
+          box-shadow: 0 0 1.2cqw rgba(var(--acc-rgb), .9); }
+  .rule::after { content: ""; position: absolute; right: -3px; top: -3px; width: 8px; height: 8px; border-radius: 50%;
+                 background: #fff; box-shadow: 0 0 14px 4px rgb(var(--acc-rgb)); opacity: var(--head, 1); }
+  .rule.go { animation: rule 1.5s cubic-bezier(.3,.7,.2,1) forwards; }
+  @keyframes rule { from { width: 0; } to { width: 34cqw; } }
+  .sub { font: 500 clamp(8px, 1.5cqw, 14px) ui-monospace, Consolas, monospace; color: #9aa3c8; white-space: nowrap; }
+  .sub i { font-style: normal; color: #55608a; }
+  .sub em { font-style: normal; color: rgb(var(--acc-rgb)); text-shadow: 0 0 1cqw rgba(var(--acc-rgb), .8); animation: seg .5s ease-out; }
+  @keyframes seg { from { opacity: 0; transform: translateX(-.6cqw); } }
+  .pills { display: flex; gap: .7cqw; }
+  .pill { padding: .45cqw 1.1cqw; border-radius: .4cqw; font: 600 clamp(7px, 1.25cqw, 12px) ui-monospace, Consolas, monospace; letter-spacing: .08em;
+          color: #7b84ad; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.12); transition: all .4s; }
+  .pill.on { color: #fff; background: rgba(var(--acc-rgb), .28); border-color: rgb(var(--acc-rgb)); box-shadow: 0 0 1.4cqw rgba(var(--acc-rgb), .5); }
+</style>
+</head>
+<body>
+<div class="stage" id="stage" title="klik = jeda / lanjut">
+  <canvas id="bg"></canvas>
+  <div class="world" id="world"></div>
+  <canvas id="fg"></canvas>
+  <div class="vig"></div>
+  <div class="flash" id="flash"></div>
+  <div class="hud">
+    <div class="left">
+      <div class="row1"><span class="badge" id="badge"></span><span class="title" id="title"></span></div>
+      <div class="rule" id="rule"></div>
+      <div class="sub" id="sub"></div>
+    </div>
+    <div class="pills" id="pills"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------- helpers ---------- */
+  const stage = document.getElementById('stage'), world = document.getElementById('world');
+  const bgc = document.getElementById('bg'), fgc = document.getElementById('fg');
+  const bx = bgc.getContext('2d'), fx = fgc.getContext('2d');
+  const badgeEl = document.getElementById('badge'), titleEl = document.getElementById('title');
+  const subEl = document.getElementById('sub'), ruleEl = document.getElementById('rule');
+  const pillsEl = document.getElementById('pills'), flashEl = document.getElementById('flash');
+
+  function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const R = rng(11);
+  const rr = (a, b) => a + (b - a) * R();
+  const pick = a => a[Math.floor(R() * a.length)];
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+  const ease = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+
+  /* ---------- world layout ---------- */
+  const COLS = 5, ROWS = 8, CW = 300, CH = 150, PX = 440, PY = 190, X0 = 170, Y0 = 250;
+  const WW = X0 * 2 + PX * (COLS - 1) + CW;
+  const WH = Y0 + PY * (ROWS - 1) + CH + 160;
+  world.style.width = WW + 'px'; world.style.height = WH + 'px';
+
+  const PRE = ['state','draft','score','route','gate','embed','queue','spend','audit','handoff','cache','retry','verify','plan','recall','notify'];
+  const SUF = ['encoder','head','reply','folder','ping','guard','table','stream','check','router','memo','window','log','probe'];
+  const TAGS = ['ok','sync','wait','idle','cached','warm'];
+  const KV = [
+    () => ['p', (.5 + R() * .49).toFixed(2)], () => ['lat', Math.round(60 + R() * 320) + 'ms'],
+    () => ['cost', '$' + (R() * .02).toFixed(3)], () => ['n', Math.round(R() * 900)],
+    () => ['ttl', Math.round(5 + R() * 55) + 's'], () => ['conf', (.6 + R() * .39).toFixed(2)],
+    () => ['tok', Math.round(80 + R() * 1800)], () => ['hits', Math.round(R() * 99) + '%'],
+  ];
+  const COLHEAD = ['STATE / IN', 'TYPED / QUESTIONS', 'JEV / SYSTEM ONE', 'GATE / ROUTE', 'CODE / ACTS'];
+
+  const cards = [];
+  for (let c = 0; c < COLS; c++) {
+    const h = document.createElement('div'); h.className = 'colhead'; h.textContent = COLHEAD[c];
+    h.style.left = X0 + c * PX + 'px'; h.style.top = Y0 - 90 + (c % 2) * 38 + 'px'; world.appendChild(h);
+    for (let r = 0; r < ROWS; r++) {
+      const i = c * ROWS + r;
+      const card = { c, r, x: X0 + c * PX + (R() - .5) * 12, y: Y0 + r * PY + (c % 2) * 38 + (R() - .5) * 10 };
+      card.name = PRE[(i * 5 + c) % PRE.length] + '_' + SUF[(i * 3 + r) % SUF.length];
+      card.tag = pick(TAGS);
+      const el = document.createElement('div'); el.className = 'card';
+      el.style.left = card.x + 'px'; el.style.top = card.y + 'px';
+      const rows = [0, 1, 2].map(() => pick(KV)()).map(([k, v]) => `<div class="kv"><i>${k}</i><b>${v}</b></div>`).join('');
+      el.innerHTML = `<h4><span class="name">${card.name}</span><span class="tag">${card.tag}</span></h4>${rows}` +
+                     `<div class="bar"><u style="width:${Math.round(20 + R() * 75)}%"></u></div><div class="chip"></div>`;
+      card.el = el; card.nameEl = el.querySelector('.name'); card.tagEl = el.querySelector('.tag'); card.chipEl = el.querySelector('.chip');
+      world.appendChild(el); cards.push(card);
+    }
+  }
+  const cardAt = (c, r) => cards[c * ROWS + r];
+  const ctr = k => ({ x: k.x + CW / 2, y: k.y + CH / 2 });
+
+  /* ---------- cases (mirrors the 4 scenes of the video) ---------- */
+  const CASES = [
+    { n: '01', title: 'EMAIL TRIAGE', sub: 'Choice · folder', rgb: '255,106,43', tab: 2,
+      hot: [{ c: 0, r: 1, name: 'email', chip: 'inbox · 1 new' }, { c: 1, r: 3, name: 'choice · folder', chip: 'phishing 0.97' }, { c: 3, r: 2, name: 'mail moved', chip: 'quarantine' }],
+      reveal: ['phishing 0.97', 'quarantine', 'mail moved', 'LLM never woke'] },
+    { n: '08', title: 'INBOUND LEAD', sub: 'Score · lead_quality', rgb: '255,210,63', tab: 1,
+      hot: [{ c: 1, r: 2, name: 'score · lead', chip: 'high 0.89' }, { c: 2, r: 4, name: 'route · crm', chip: 'sales queue' }, { c: 4, r: 3, name: 'meeting booked', chip: 'calendar ✓' }],
+      reveal: ['high 0.89', 'route · crm', 'booked', 'no human needed'] },
+    { n: '12', title: 'BROWSER AGENT', sub: 'Choice · action', rgb: '77,163,255', tab: 3,
+      hot: [{ c: 0, r: 4, name: 'dom snapshot', chip: 'page ready' }, { c: 2, r: 2, name: 'click · target', chip: 'btn#submit' }, { c: 3, r: 5, name: 'verify · diff', chip: 'state changed' }],
+      reveal: ['dom snapshot', 'click · target', 'verified', 'agent idle'] },
+    { n: '04', title: 'X FEED POST', sub: 'Score · viral_fit', rgb: '255,63,208', tab: 4,
+      hot: [{ c: 0, r: 5, name: 'score head', chip: 'high 0.92' }, { c: 1, r: 6, name: 'draft_short', chip: 'v3 · 214 chars' }, { c: 3, r: 4, name: 'review folder', chip: 'awaiting you' }],
+      reveal: ['high 0.92', 'draft_short', 'review folder', 'you hit Post'] },
+  ];
+  const TABS = ['STATE', 'ASK', 'JEV', 'GATE', 'CODE'];
+  pillsEl.innerHTML = TABS.map(t => `<span class="pill">${t}</span>`).join('');
+  const pillEls = [...pillsEl.children];
+
+  // timeline (seconds inside one case)
+  const D = 12.4;
+  const HOT_T = [2.2, 5.2, 8.4];
+  const PATH_T = [[3.0, 5.1], [6.2, 8.3]];
+  const FINAL_T = 9.7;
+
+  /* ---------- decorative network: links, streaks, pulses ---------- */
+  function mkLink(a, b) {
+    let p0, p3, c1, c2;
+    if (a.c === b.c) {
+      const down = b.y > a.y;
+      p0 = { x: a.x + CW * rr(.2, .8), y: down ? a.y + CH : a.y };
+      p3 = { x: b.x + CW * rr(.2, .8), y: down ? b.y : b.y + CH };
+      const k = (p3.y - p0.y) * .5;
+      c1 = { x: p0.x + rr(-60, 60), y: p0.y + k }; c2 = { x: p3.x + rr(-60, 60), y: p3.y - k };
+    } else {
+      const right = b.c > a.c;
+      p0 = { x: right ? a.x + CW : a.x, y: a.y + CH * rr(.15, .85) };
+      p3 = { x: right ? b.x : b.x + CW, y: b.y + CH * rr(.15, .85) };
+      const k = Math.abs(p3.x - p0.x) * .5 * (right ? 1 : -1);
+      c1 = { x: p0.x + k, y: p0.y + rr(-30, 30) }; c2 = { x: p3.x - k, y: p3.y + rr(-30, 30) };
+    }
+    return { p0, c1, c2, p3 };
+  }
+  function nearCard(a) {
+    for (let n = 0; n < 20; n++) {
+      const c = Math.max(0, Math.min(COLS - 1, a.c + Math.round(rr(-2, 2))));
+      const r = Math.max(0, Math.min(ROWS - 1, a.r + Math.round(rr(-3, 3))));
+      const b = cardAt(c, r); if (b !== a) return b;
+    }
+    return cardAt(0, 0);
+  }
+  function bez(l, u) {
+    const v = 1 - u, a = v * v * v, b = 3 * v * v * u, c = 3 * v * u * u, d = u * u * u;
+    return { x: a * l.p0.x + b * l.c1.x + c * l.c2.x + d * l.p3.x, y: a * l.p0.y + b * l.c1.y + c * l.c2.y + d * l.p3.y };
+  }
+  const BUCKETS = [
+    { rgb: '200,215,255', a: .15, links: [] }, { rgb: '150,120,255', a: .17, links: [] },
+    { rgb: '255,120,200', a: .14, links: [] }, { rgb: '255,170,90', a: .12, links: [] },
+    { rgb: '110,220,255', a: .15, links: [] },
+  ];
+  const allLinks = [];
+  for (let i = 0; i < 300; i++) {
+    const a = pick(cards), l = mkLink(a, nearCard(a));
+    BUCKETS[i % BUCKETS.length].links.push(l); allLinks.push(l);
+  }
+  const streaks = { rgb: '210,225,255', a: .1, links: [] };
+  for (let i = 0; i < 46; i++) {
+    const p0 = { x: rr(-500, WW + 500), y: rr(-300, WH + 300) };
+    const ang = rr(-.6, .6) + (R() < .5 ? 0 : Math.PI), len = rr(900, 2400);
+    const dx = Math.cos(ang), dy = Math.sin(ang), bow = rr(-120, 120);
+    const l = { p0, p3: { x: p0.x + dx * len, y: p0.y + dy * len },
+      c1: { x: p0.x + dx * len * .33 - dy * bow, y: p0.y + dy * len * .33 + dx * bow },
+      c2: { x: p0.x + dx * len * .66 + dy * bow, y: p0.y + dy * len * .66 - dx * bow } };
+    streaks.links.push(l); allLinks.push(l);
+  }
+  const pulses = Array.from({ length: 48 }, () => ({ l: pick(allLinks), sp: rr(.08, .3), ph: R(), rgb: pick(['255,255,255', '160,220,255', '255,170,230', '255,200,120']) }));
+
+  /* ---------- light pillars ---------- */
+  const PCOL = [[255,255,255], [150,230,255], [255,150,230], [255,215,140], [185,165,255]];
+  const pxs = [100, 540, 760, 980, 1420, 1640, 1860, 2090, 2300];
+  const pillars = pxs.map((x, i) => ({
+    x: x + rr(-14, 14), col: PCOL[i % PCOL.length], base: rr(.7, 1), sp: rr(.8, 1.6), ph0: rr(0, 6.28),
+    strands: Array.from({ length: 9 }, () => ({ off: rr(-15, 15), amp: rr(3, 11), fr: rr(.004, .012), ph: rr(0, 6.28), sp: rr(.5, 1.4), w: rr(.8, 2.2), a: rr(.35, .85), white: R() < .45 })),
+    packets: Array.from({ length: 3 }, () => ({ sp: rr(.05, .13), dir: R() < .5 ? 1 : -1, ph: R() })),
+  }));
+  const sparks = Array.from({ length: 240 }, () => {
+    const near = R() < .55 ? pick(pillars).x + (R() + R() + R() - 1.5) * 90 : rr(-200, WW + 200);
+    return { x: near, y: rr(-200, WH + 200), v: rr(6, 30), ph: rr(0, 6.28), sp: rr(1, 4), s: rr(.8, 2.3), white: R() < .6 };
+  });
+
+  /* ---------- runtime state ---------- */
+  let W = 0, H = 0, dpr = 1, S = 1, fit = 1;
+  const cam = { x: WW / 2, y: WH / 2, z: 1, r: 0 };
+  let ci = -1, cs = null, tc = 0, time = 0, paused = false;
+  let keys = [], ev = [], evIdx = 0, hotCards = [], subSegs = [];
+  let run = { paths: [], branches: [], rings: [], hotAt: [-1, -1, -1] };
+
+  function resize() {
+    W = stage.clientWidth; H = stage.clientHeight; dpr = Math.min(window.devicePixelRatio || 1, 2);
+    for (const c of [bgc, fgc]) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    fit = Math.max(W / WW, H / WH);
+  }
+  new ResizeObserver(resize).observe(stage); resize();
+
+  /* ---------- case setup ---------- */
+  const shift = (l, dy) => ({ p0: l.p0, p3: l.p3, c1: { x: l.c1.x, y: l.c1.y + dy }, c2: { x: l.c2.x, y: l.c2.y - dy * .6 } });
+  function pathBetween(a, b) {
+    const p0 = { x: a.x + CW, y: a.y + CH * .5 }, p3 = { x: b.x, y: b.y + CH * .5 };
+    const dx = Math.max(140, Math.abs(p3.x - p0.x) * .5);
+    const l = { p0, p3, c1: { x: p0.x + dx, y: p0.y }, c2: { x: p3.x - dx, y: p3.y } };
+    return [l, shift(l, -34), shift(l, 28)];
+  }
+  function buildCam() {
+    const [A, B, C] = hotCards.map(ctr);
+    const mid = (p, q) => ({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+    const to = (p, q, f) => ({ x: p.x + (q.x - p.x) * f, y: p.y + (q.y - p.y) * f });
+    const home = { x: WW / 2, y: WH / 2 };
+    return [
+      { t: 0,    ...home,            z: 1,    r: 0 },
+      { t: 1.5,  ...to(A, B, .15),   z: 1.9,  r: -.7 },
+      { t: 2.9,  ...to(A, B, .08),   z: 2.7,  r: -1.1 },
+      { t: 4.9,  ...mid(A, B),       z: 1.55, r: .5 },
+      { t: 6.3,  ...to(B, C, .08),   z: 2.4,  r: 1.0 },
+      { t: 8.1,  ...mid(B, C),       z: 1.5,  r: -.4 },
+      { t: 9.4,  ...to(C, B, .05),   z: 2.5,  r: .6 },
+      { t: 11.4, ...home,            z: 1,    r: 0 },
+    ];
+  }
+  function renderSub() {
+    subEl.innerHTML = subSegs.map((s, i) => i === subSegs.length - 1 && subSegs.length > 1 ? `<em>${s}</em>` : `<span>${s}</span>`).join('<i> · </i>');
+  }
+  function addRing(card) { const p = ctr(card); run.rings.push({ x: p.x, y: p.y, t0: tc }); }
+
+  function setCase(i) {
+    ci = i; cs = CASES[i]; tc = 0; evIdx = 0;
+    for (const c of hotCards) { c.el.classList.remove('hot'); c.nameEl.textContent = c.name; c.tagEl.textContent = c.tag; c.chipEl.textContent = ''; }
+    hotCards = cs.hot.map(h => {
+      const c = cardAt(h.c, h.r); c.nameEl.textContent = h.name; c.tagEl.textContent = 'live'; c.chipEl.textContent = h.chip; return c;
+    });
+    stage.style.setProperty('--acc-rgb', cs.rgb);
+    badgeEl.textContent = `CASE ${cs.n} / 12`; titleEl.textContent = cs.title;
+    titleEl.classList.remove('in'); ruleEl.classList.remove('go'); flashEl.classList.remove('go');
+    void titleEl.offsetWidth; titleEl.classList.add('in'); ruleEl.classList.add('go'); flashEl.classList.add('go');
+    pillEls.forEach((p, k) => p.classList.toggle('on', k === cs.tab));
+    subSegs = [cs.sub]; renderSub();
+
+    keys = buildCam();
+    run = { paths: [], branches: [], rings: [], hotAt: [-1, -1, -1] };
+    for (let k = 0; k < 2; k++) run.paths.push({ bundle: pathBetween(hotCards[k], hotCards[k + 1]), t0: PATH_T[k][0], t1: PATH_T[k][1] });
+    hotCards.forEach((card, k) => {
+      const list = [];
+      for (let n = 0; n < 7; n++) list.push({ l: mkLink(card, nearCard(card)), d: rr(0, .6) });
+      run.branches[k] = list;
+    });
+    ev = HOT_T.map((t, k) => ({ t, fn: () => {
+      hotCards[k].el.classList.add('hot'); addRing(hotCards[k]); run.hotAt[k] = tc;
+      subSegs.push(cs.reveal[k]); renderSub();
+    } }));
+    ev.push({ t: FINAL_T, fn: () => { subSegs.push(cs.reveal[3]); renderSub(); } });
+  }
+
+  /* ---------- camera ---------- */
+  function sampleCam(t) {
+    const k = keys;
+    if (t <= k[0].t) return { ...k[0] };
+    if (t >= k[k.length - 1].t) return { ...k[k.length - 1] };
+    let i = 0; while (i < k.length - 2 && t > k[i + 1].t) i++;
+    const a = k[i], b = k[i + 1], u = ease(clamp01((t - a.t) / (b.t - a.t)));
+    return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u,
+             z: Math.exp(Math.log(a.z) + (Math.log(b.z) - Math.log(a.z)) * u), r: a.r + (b.r - a.r) * u };
+  }
+  function applyCam(ctx) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(W / 2, H / 2); ctx.rotate(cam.r * Math.PI / 180); ctx.scale(S, S); ctx.translate(-cam.x, -cam.y);
+  }
+  const px = n => n / S;
+
+  /* ---------- drawing ---------- */
+  function strokeCurve(ctx, l, a, b, lw, style) {
+    const N = 56, i0 = Math.ceil(a * N), i1 = Math.floor(b * N);
+    ctx.lineWidth = lw; ctx.strokeStyle = style; ctx.beginPath();
+    const s = bez(l, a); ctx.moveTo(s.x, s.y);
+    for (let i = i0; i <= i1; i++) { const p = bez(l, i / N); ctx.lineTo(p.x, p.y); }
+    const e = bez(l, b); ctx.lineTo(e.x, e.y); ctx.stroke();
+  }
+  function glow(ctx, x, y, r, stops) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    for (const [o, c] of stops) g.addColorStop(o, c);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill();
+  }
+
+  function drawBg() {
+    bx.setTransform(1, 0, 0, 1, 0, 0); bx.clearRect(0, 0, bgc.width, bgc.height);
+    applyCam(bx);
+    bx.strokeStyle = 'rgba(120,140,255,.055)'; bx.lineWidth = px(1); bx.beginPath();
+    for (let x = -1000; x <= WW + 1000; x += 90) { bx.moveTo(x, -1000); bx.lineTo(x, WH + 1000); }
+    for (let y = -1000; y <= WH + 1000; y += 90) { bx.moveTo(-1000, y); bx.lineTo(WW + 1000, y); }
+    bx.stroke();
+  }
+
+  function drawNetwork(t) {
+    fx.lineCap = 'round';
+    for (const b of [...BUCKETS, streaks]) {
+      const a = b.a * (.8 + .25 * Math.sin(t * .9 + b.links.length));
+      fx.strokeStyle = `rgba(${b.rgb},${a.toFixed(3)})`; fx.lineWidth = px(1.1); fx.beginPath();
+      for (const l of b.links) { fx.moveTo(l.p0.x, l.p0.y); fx.bezierCurveTo(l.c1.x, l.c1.y, l.c2.x, l.c2.y, l.p3.x, l.p3.y); }
+      fx.stroke();
+    }
+    for (const p of pulses) {
+      const u = (t * p.sp + p.ph) % 1;
+      for (let k = 0; k < 6; k++) {
+        const u0 = u - k * .014, u1 = u - (k + 1) * .014; if (u1 < 0) break;
+        const a = bez(p.l, u0), b = bez(p.l, u1);
+        fx.strokeStyle = `rgba(${p.rgb},${(.75 - k * .12).toFixed(2)})`; fx.lineWidth = px(1.8);
+        fx.beginPath(); fx.moveTo(a.x, a.y); fx.lineTo(b.x, b.y); fx.stroke();
+      }
+      const h = bez(p.l, u); glow(fx, h.x, h.y, px(7), [[0, `rgba(${p.rgb},.8)`], [1, `rgba(${p.rgb},0)`]]);
+    }
+  }
+
+  function drawPillars(t) {
+    const top = -400, bot = WH + 400, span = bot - top, segs = 20, step = span / segs;
+    for (const p of pillars) {
+      const [r, g, b] = p.col, pulse = .75 + .25 * Math.sin(t * p.sp + p.ph0);
+      // soft bloom
+      const gw = 170, gr = fx.createLinearGradient(p.x - gw, 0, p.x + gw, 0);
+      gr.addColorStop(0, `rgba(${r},${g},${b},0)`); gr.addColorStop(.5, `rgba(${r},${g},${b},${(.14 * p.base * pulse).toFixed(3)})`); gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      fx.fillStyle = gr; fx.fillRect(p.x - gw, top, gw * 2, span);
+      // frayed strands
+      for (const s of p.strands) {
+        fx.lineWidth = px(s.w);
+        const [sr, sg, sb] = s.white ? [255, 255, 255] : [r, g, b];
+        let ox = 0, oy = 0;
+        for (let i = 0; i <= segs; i++) {
+          const y = top + i * step, f = i / segs, edge = Math.pow(Math.abs(f - .5) * 2, 3), flare = 1 + 3.2 * edge;
+          const x = p.x + s.off * flare + Math.sin(y * s.fr + t * s.sp + s.ph) * s.amp * flare;
+          if (i > 0) {
+            const a = s.a * p.base * pulse * (.15 + .85 * Math.pow(.5 + .5 * Math.sin(y * .007 + t * s.sp * 1.3 + s.ph * 2), 3)) * (1 - Math.pow(Math.abs(f - .5) * 2, 4) * .85);
+            fx.strokeStyle = `rgba(${sr},${sg},${sb},${a.toFixed(3)})`;
+            fx.beginPath(); fx.moveTo(ox, oy); fx.lineTo(x, y); fx.stroke();
+          }
+          ox = x; oy = y;
+        }
+      }
+      // hot core
+      const cg = fx.createLinearGradient(0, top, 0, bot);
+      const cc = `${(255 + r) >> 1},${(255 + g) >> 1},${(255 + b) >> 1}`;
+      cg.addColorStop(0, `rgba(${cc},0)`); cg.addColorStop(.22, `rgba(${cc},${.25 * p.base})`);
+      cg.addColorStop(.5, `rgba(${cc},${.95 * p.base * pulse})`); cg.addColorStop(.78, `rgba(${cc},${.25 * p.base})`); cg.addColorStop(1, `rgba(${cc},0)`);
+      fx.fillStyle = cg; fx.fillRect(p.x - px(1.2), top, px(2.4), span);
+      fx.globalAlpha = .35; fx.fillRect(p.x - px(4.5), top, px(9), span); fx.globalAlpha = 1;
+      // traveling light packets
+      for (const k of p.packets) {
+        const f = (((t * k.sp * k.dir + k.ph) % 1) + 1) % 1, y = top + f * span;
+        fx.save(); fx.translate(p.x, y); fx.scale(1, 5);
+        glow(fx, 0, 0, 28, [[0, 'rgba(255,255,255,.85)'], [.35, `rgba(${r},${g},${b},.4)`], [1, `rgba(${r},${g},${b},0)`]]);
+        fx.restore();
+      }
+    }
+  }
+
+  function drawSparks(t, dt) {
+    for (const s of sparks) {
+      s.y -= s.v * dt; if (s.y < -250) s.y = WH + 250;
+      const a = Math.pow(.5 + .5 * Math.sin(t * s.sp + s.ph), 4);
+      fx.fillStyle = s.white ? `rgba(255,255,255,${(a * .9).toFixed(2)})` : `rgba(${cs.rgb},${(a * .9).toFixed(2)})`;
+      const r = px(s.s); fx.fillRect(s.x - r, s.y - r, r * 2, r * 2);
+    }
+  }
+
+  function drawHot(t) {
+    const rgb = cs.rgb;
+    // branches (thin accent streaks radiating from each activated card)
+    run.branches.forEach((list, k) => {
+      if (run.hotAt[k] < 0) return;
+      const age = tc - run.hotAt[k];
+      for (const br of list) {
+        const p = ease(clamp01((age - br.d) / 1.4)); if (p <= 0) continue;
+        strokeCurve(fx, br.l, 0, p, px(6), `rgba(${rgb},.1)`);
+        strokeCurve(fx, br.l, 0, p, px(1.4), `rgba(${rgb},${(.55 + .2 * Math.sin(t * 3 + br.d * 9)).toFixed(2)})`);
+      }
+    });
+    // main connecting lines
+    for (const path of run.paths) {
+      const p = ease(clamp01((tc - path.t0) / (path.t1 - path.t0))); if (p <= 0) continue;
+      path.bundle.forEach((l, i) => {
+        const m = i === 0 ? 1 : .5;
+        if (i === 0) strokeCurve(fx, l, 0, p, px(26), `rgba(${rgb},.1)`);
+        strokeCurve(fx, l, 0, p, px(9) * m, `rgba(${rgb},${.28 * m})`);
+        strokeCurve(fx, l, 0, p, px(3) * m, `rgba(${rgb},${.85 * m})`);
+        strokeCurve(fx, l, 0, p, px(1.2) * m, `rgba(255,255,255,${.95 * m})`);
+      });
+      const main = path.bundle[0];
+      if (p < 1) { // glowing head
+        const h = bez(main, p), R0 = Math.max(70, px(34));
+        glow(fx, h.x, h.y, R0, [[0, 'rgba(255,255,255,.95)'], [.25, `rgba(${rgb},.7)`], [1, `rgba(${rgb},0)`]]);
+      } else { // flowing pulses
+        for (let k = 0; k < 4; k++) {
+          const u = ((t * .35 + k / 4) % 1), h = bez(main, u);
+          glow(fx, h.x, h.y, Math.max(34, px(14)), [[0, 'rgba(255,255,255,.95)'], [.4, `rgba(${rgb},.6)`], [1, `rgba(${rgb},0)`]]);
+        }
+      }
+    }
+    // orbs + shock rings on activated cards
+    hotCards.forEach((card, k) => {
+      if (run.hotAt[k] < 0) return;
+      const age = tc - run.hotAt[k], x = card.x + CW * .86, y = card.y + CH * .3;
+      const r0 = (k === 2 ? 110 : 80) * (1 + .15 * Math.sin(t * 5 + k)) * Math.min(1, age * 2);
+      glow(fx, x, y, r0, [[0, 'rgba(255,255,255,.95)'], [.12, `rgba(${rgb},.85)`], [.5, `rgba(${rgb},.18)`], [1, `rgba(${rgb},0)`]]);
+    });
+    run.rings = run.rings.filter(g => tc - g.t0 < 1.4);
+    for (const g of run.rings) {
+      const u = (tc - g.t0) / 1.4, r = 40 + ease(u) * 330;
+      fx.lineWidth = px(2.4); fx.strokeStyle = `rgba(${rgb},${(.8 * (1 - u)).toFixed(2)})`;
+      fx.beginPath(); fx.arc(g.x, g.y, r, 0, 6.2832); fx.stroke();
+    }
+  }
+
+  function drawFg(t, dt) {
+    fx.setTransform(1, 0, 0, 1, 0, 0); fx.clearRect(0, 0, fgc.width, fgc.height);
+    applyCam(fx); fx.globalCompositeOperation = 'lighter';
+    drawNetwork(t); drawPillars(t); drawHot(t); drawSparks(t, dt);
+    fx.globalCompositeOperation = 'source-over';
+  }
+
+  /* ---------- main loop ---------- */
+  let last = performance.now();
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const dt = Math.min(.05, (now - last) / 1000); last = now;
+    if (!W || !H || !fit) { resize(); return; }
+    if (!paused) {
+      time += dt; tc += dt;
+      if (tc >= D) setCase((ci + 1) % CASES.length);
+      while (evIdx < ev.length && tc >= ev[evIdx].t) ev[evIdx++].fn();
+    }
+    const c = sampleCam(tc);
+    // living drift on top of the keyframed move
+    cam.x = c.x + Math.sin(time * .7) * 26 / c.z; cam.y = c.y + Math.cos(time * .53) * 20 / c.z;
+    cam.r = c.r + Math.sin(time * .41) * .35; cam.z = c.z * (1 + .02 * Math.sin(time * 1.1));
+    S = fit * cam.z;
+    world.style.transform = `translate(${W / 2}px,${H / 2}px) rotate(${cam.r}deg) scale(${S}) translate(${-cam.x}px,${-cam.y}px)`;
+    drawBg(); drawFg(time, paused ? 0 : dt);
+  }
+
+  stage.addEventListener('click', () => { paused = !paused; });
+  setCase(0);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

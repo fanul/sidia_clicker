@@ -587,6 +587,8 @@ async function processDocumentsFromTable(page, menu, config) {
 
     let hasDocuments = true;
     let processedCount = 0;
+    let docSkipIndex = 0;
+    let failedAttemptsForCurrentDoc = 0;
     let consecutiveEmptyChecks = 0;
     let consecutiveDetailPageErrors = 0;
     const maxEmptyChecks = 2; // Give up after 2 consecutive empty checks
@@ -690,28 +692,35 @@ async function processDocumentsFromTable(page, menu, config) {
             await sleep(3000);
         }
 
-        // Check if there are still documents to process
-        const documentsAvailable = await page.evaluate(() => {
-            const lihatBtn = Array.from(document.querySelectorAll('button, .v-btn')).find(btn =>
-                (btn.textContent || '').includes('Lihat')
-            );
+        // Check if there are still documents to process at docSkipIndex
+        const documentsAvailable = await page.evaluate((skipIdx) => {
+            const activeWindow = document.querySelector('.v-window-item--active') || document;
+            const buttons = Array.from(activeWindow.querySelectorAll('button, .v-btn'));
+            const lihatButtons = buttons.filter(btn => {
+                const text = (btn.textContent || '').trim();
+                const isVisible = btn.offsetParent !== null;
+                const isEnabled = !btn.disabled && !btn.classList.contains('v-btn--disabled');
+                return text.includes('Lihat') && isVisible && isEnabled;
+            });
             return {
-                hasDocuments: lihatBtn !== null
+                totalLihat: lihatButtons.length,
+                hasDocuments: lihatButtons.length > skipIdx
             };
-        });
+        }, docSkipIndex);
 
         if (!documentsAvailable.hasDocuments) {
-            console.log(chalk.green('    → All documents processed'));
+            console.log(chalk.green(`    → Semua dokumen yang dapat diproses telah selesai (Total tombol: ${documentsAvailable.totalLihat}, Dilewati: ${docSkipIndex})`));
             break;
         }
 
-        console.log(chalk.gray(`    → Processing document ${processedCount + 1}...`));
+        console.log(chalk.gray(`    → Processing document ${processedCount + 1} (Baris ke-${docSkipIndex + 1} dari ${documentsAvailable.totalLihat} dokumen)...`));
 
-        // Process single document using the new module
-        const processed = await processSingleDocument(page, config);
+        // Process single document using docSkipIndex
+        const processed = await processSingleDocument(page, config, docSkipIndex);
 
         if (processed) {
             processedCount++;
+            failedAttemptsForCurrentDoc = 0;
             record('doc', { menu: menu.text });
             console.log(chalk.green(`    ✓ Document ${processedCount} processed successfully`));
 
@@ -720,23 +729,28 @@ async function processDocumentsFromTable(page, menu, config) {
             await sleep(2000);
 
         } else {
-            console.log(chalk.red('    ✗ Failed to process document'));
+            failedAttemptsForCurrentDoc++;
+            console.log(chalk.red(`    ✗ Gagal memproses dokumen pada baris ke-${docSkipIndex + 1} (Percobaan ${failedAttemptsForCurrentDoc}/2)`));
 
-            // Check if we should retry or stop
-            const recheck = await page.evaluate(() => {
-                const lihatBtn = Array.from(document.querySelectorAll('button, .v-btn')).find(btn =>
-                    (btn.textContent || '').includes('Lihat')
-                );
-                return lihatBtn !== null;
-            });
-
-            if (!recheck) {
-                console.log(chalk.yellow('    → No more documents available'));
-                break;
+            // Pastikan kita kembali ke list page jika masih di detail page
+            const currentUrl = page.url();
+            if (currentUrl.includes('/inbox/') && currentUrl.includes('?obj=')) {
+                await page.evaluate(() => {
+                    const btns = Array.from(document.querySelectorAll('button, .v-btn'));
+                    const kembali = btns.find(b => (b.textContent || '').toUpperCase().includes('KEMBALI'));
+                    if (kembali) kembali.click();
+                });
+                await sleep(3000);
             }
 
-            console.log(chalk.yellow('    → Retrying same document...'));
-            await sleep(5000);
+            if (failedAttemptsForCurrentDoc >= 2) {
+                console.log(chalk.yellow(`    ⚠️ Melewati dokumen baris ke-${docSkipIndex + 1} karena tidak memiliki tombol feedback/form setelah 2x percobaan.`));
+                docSkipIndex++;
+                failedAttemptsForCurrentDoc = 0;
+            } else {
+                console.log(chalk.yellow('    → Mencoba ulang dokumen yang sama...'));
+                await sleep(3000);
+            }
         }
 
         await sleep(TIMING.NAVIGATION);
