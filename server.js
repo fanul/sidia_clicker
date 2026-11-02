@@ -39,7 +39,10 @@ function pushLog(chunk) {
     } catch (e) {}
 
     text.split(/\r?\n/).forEach(line => {
-        if (line.trim()) logLines.push(line);
+        if (line.trim()) {
+            logLines.push(line);
+            updateTelemetryFromLine(line);
+        }
     });
     if (logLines.length > MAX_LOG_LINES) {
         logLines = logLines.slice(-MAX_LOG_LINES);
@@ -59,6 +62,7 @@ function startAutomation(headless) {
     logLines = [];
     lastExitCode = null;
     startedAt = new Date();
+    resetTelemetry();
 
     // Re-read .env so settings saved from the dashboard apply without restarting the server
     const env = { ...process.env, ...readValues() };
@@ -72,6 +76,7 @@ function startAutomation(headless) {
         pushLog(`--- Automation exited (code ${code}) ---`);
         lastExitCode = code;
         child = null;
+        finalizeTelemetry(code);
     });
     return true;
 }
@@ -339,100 +344,174 @@ function buildStats() {
     };
 }
 
-function parseTelemetry(logs) {
-    let currentMenu = 'Naskah Masuk';
-    let totalTarget = 0;
-    let currentDocIndex = 0;
-    let currentStep = 'Idle';
-    let currentStepKey = 'idle';
-    let actionDetail = 'Menunggu instruksi';
-    let skippedCount = 0;
+let activeTelemetry = {
+    currentMenu: 'Naskah Masuk',
+    totalTarget: 0,
+    currentDocIndex: 0,
+    completedDocs: 0,
+    skippedCount: 0,
+    currentStep: 'Idle',
+    currentStepKey: 'idle',
+    actionDetail: 'Menunggu instruksi',
+    percent: 0,
+    elapsedSec: 0,
+    avgSecPerDoc: 18,
+    etaSec: 0,
+    docPerihal: ''
+};
 
-    for (let i = logs.length - 1; i >= 0; i--) {
-        const line = logs[i];
-        
-        // Detect menu & target docs
-        if (!totalTarget) {
-            const menuMatch = line.match(/Submenu clicked:\s*([A-Za-z\s]+)\s*(\d+)/i) || line.match(/Processing menu:\s*([A-Za-z\s]+)\s*(\d+)/i);
-            if (menuMatch) {
-                currentMenu = menuMatch[1].trim();
-                totalTarget = parseInt(menuMatch[2], 10);
-            }
+function resetTelemetry() {
+    activeTelemetry = {
+        currentMenu: 'Naskah Masuk',
+        totalTarget: 0,
+        currentDocIndex: 0,
+        completedDocs: 0,
+        skippedCount: 0,
+        currentStep: 'Inisialisasi',
+        currentStepKey: 'navigating',
+        actionDetail: 'Mempersiapkan browser & navigasi sesi SIDIA...',
+        percent: 0,
+        elapsedSec: 0,
+        avgSecPerDoc: 18,
+        etaSec: 0,
+        docPerihal: ''
+    };
+}
+
+function finalizeTelemetry(exitCode) {
+    if (activeTelemetry.totalTarget > 0) {
+        activeTelemetry.currentStep = 'Batch Selesai';
+        activeTelemetry.currentStepKey = 'batch_complete';
+        activeTelemetry.actionDetail = exitCode === 0 
+            ? 'Seluruh dokumen batch berhasil diproses.'
+            : `Otomasi selesai (Kode keluar: ${exitCode}).`;
+        activeTelemetry.percent = 100;
+        activeTelemetry.remaining = 0;
+    } else {
+        activeTelemetry.currentStep = 'Idle';
+        activeTelemetry.currentStepKey = 'idle';
+        activeTelemetry.actionDetail = 'Sistem Siap';
+    }
+}
+
+function updateTelemetryFromLine(line) {
+    if (!line) return;
+
+    // 1. Detect menu & total target docs (e.g. "Submenu clicked: Surat Masuk 8", "1. Surat Masuk (8 documents)")
+    const m1 = line.match(/(?:Submenu clicked|Processing menu(?:\s+\d+\/\d+)?):\s*([A-Za-z\s]+?)(?:\s+(\d+))?$/i);
+    if (m1) {
+        if (m1[1] && m1[1].trim()) activeTelemetry.currentMenu = m1[1].trim();
+        if (m1[2]) {
+            const t = parseInt(m1[2], 10);
+            if (t > 0) activeTelemetry.totalTarget = t;
         }
-
-        // Detect current document index
-        if (!currentDocIndex) {
-            const docMatch = line.match(/Processing document\s*(\d+)/i) || line.match(/Preparing to process document\s*(\d+)/i);
-            if (docMatch) {
-                currentDocIndex = parseInt(docMatch[1], 10);
-            }
-        }
-
-        if (line.includes('Melewati dokumen baris')) {
-            skippedCount++;
-        }
-
-        // Detect current micro-action
-        if (currentStepKey === 'idle') {
-            if (line.includes('Melewati dokumen') || line.includes('melewati ke dokumen')) {
-                currentStep = 'Melewati Dokumen';
-                currentStepKey = 'skipping';
-                actionDetail = 'Dokumen tanpa tombol feedback dilewati ke baris berikutnya';
-            } else if (line.includes('Rating') || line.includes('bintang') || line.includes('star')) {
-                currentStep = 'Memberi Rating Bintang 5';
-                currentStepKey = 'rating';
-                actionDetail = 'Memilih penilaian kualitas naskah & disposisi';
-            } else if (line.includes('Simpan button clicked') || line.includes('OK button clicked') || line.includes('Dialog konfirmasi')) {
-                currentStep = 'Menyimpan Umpan Balik';
-                currentStepKey = 'saving';
-                actionDetail = 'Konfirmasi dialog penyimpanan rating & komentar';
-            } else if (line.includes('Filling textarea') || line.includes('Textarea found') || line.includes('type method')) {
-                currentStep = 'Mengetik Feedback';
-                currentStepKey = 'typing';
-                actionDetail = 'Mengisi pesan feedback ke lembar disposisi';
-            } else if (line.includes('Feedback button found') || line.includes('Clicking Feedback button')) {
-                currentStep = 'Membuka Form Feedback';
-                currentStepKey = 'feedback_modal';
-                actionDetail = 'Mengakses tombol feedback naskah & memicu dialog';
-            } else if (line.includes('Lihat button clicked') || line.includes('Waiting for page navigation after Lihat')) {
-                currentStep = 'Membuka Naskah Masuk';
-                currentStepKey = 'opening_doc';
-                actionDetail = 'Memuat lembar naskah dan data disposisi lengkap';
-            } else if (line.includes('Starting Lihat button search') || line.includes('Lihat search:')) {
-                currentStep = 'Memindai Tombol Naskah';
-                currentStepKey = 'scanning';
-                actionDetail = 'Mencari baris dokumen yang siap diproses';
-            } else if (line.includes('Disposisi tab')) {
-                currentStep = 'Memilih Tab Disposisi';
-                currentStepKey = 'tab_selection';
-                actionDetail = 'Membuka daftar disposisi dokumen naskah masuk';
-            } else if (line.includes('Submenu clicked') || line.includes('Naskah Masuk')) {
-                currentStep = 'Navigasi Menu';
-                currentStepKey = 'navigating';
-                actionDetail = 'Memilih jenis dokumen & verifikasi badge';
-            }
+    }
+    const m2 = line.match(/\d+\.\s*([A-Za-z\s]+?)\s*\(\s*(\d+)\s*documents?\)/i);
+    if (m2) {
+        if (m2[1] && m2[1].trim()) activeTelemetry.currentMenu = m2[1].trim();
+        if (m2[2]) {
+            const t = parseInt(m2[2], 10);
+            if (t > 0) activeTelemetry.totalTarget = t;
         }
     }
 
-    const percent = totalTarget > 0 ? Math.min(100, Math.round((currentDocIndex / totalTarget) * 100)) : 0;
-    const remaining = totalTarget > 0 ? Math.max(0, totalTarget - currentDocIndex) : 0;
+    // 2. Detect current document index (e.g. "Processing document 5 (Baris ke-8...)")
+    const docMatch = line.match(/Processing document\s*(\d+)/i) || line.match(/Preparing to process document\s*(\d+)/i);
+    if (docMatch) {
+        const idx = parseInt(docMatch[1], 10);
+        if (idx > activeTelemetry.currentDocIndex) {
+            activeTelemetry.currentDocIndex = idx;
+        }
+    }
+
+    // 3. Detect completed document count (e.g. "✓ Document 3 processed successfully")
+    const compMatch = line.match(/Document\s*(\d+)\s*processed successfully/i);
+    if (compMatch) {
+        const comp = parseInt(compMatch[1], 10);
+        if (comp > activeTelemetry.completedDocs) {
+            activeTelemetry.completedDocs = comp;
+        }
+    }
+
+    // 4. Detect skipped count
+    if (line.includes('Melewati dokumen baris')) {
+        activeTelemetry.skippedCount++;
+    }
+
+    // 5. Detect subject / perihal
+    const perihalMatch = line.match(/(?:Perihal|Tentang|Subject)\s*:\s*([^\r\n]+)/i);
+    if (perihalMatch) {
+        activeTelemetry.docPerihal = perihalMatch[1].trim();
+    }
+
+    // 6. Detect micro-actions and steps
+    if (line.includes('Melewati dokumen') || line.includes('melewati ke dokumen')) {
+        activeTelemetry.currentStep = 'Melewati Dokumen';
+        activeTelemetry.currentStepKey = 'skipping';
+        activeTelemetry.actionDetail = 'Dokumen tanpa tombol feedback dilewati ke baris berikutnya';
+    } else if (line.includes('Rating') || line.includes('bintang') || line.includes('star')) {
+        activeTelemetry.currentStep = 'Memberi Rating Bintang 5';
+        activeTelemetry.currentStepKey = 'rating';
+        activeTelemetry.actionDetail = 'Memilih penilaian kualitas naskah & disposisi';
+    } else if (line.includes('Simpan button clicked') || line.includes('OK button clicked') || line.includes('Dialog konfirmasi')) {
+        activeTelemetry.currentStep = 'Menyimpan Umpan Balik';
+        activeTelemetry.currentStepKey = 'saving';
+        activeTelemetry.actionDetail = 'Konfirmasi dialog penyimpanan rating & komentar';
+    } else if (line.includes('Filling textarea') || line.includes('Textarea found') || line.includes('type method')) {
+        activeTelemetry.currentStep = 'Mengetik Feedback';
+        activeTelemetry.currentStepKey = 'typing';
+        activeTelemetry.actionDetail = 'Mengisi pesan feedback ke lembar disposisi';
+    } else if (line.includes('Feedback button found') || line.includes('Clicking Feedback button')) {
+        activeTelemetry.currentStep = 'Membuka Form Feedback';
+        activeTelemetry.currentStepKey = 'feedback_modal';
+        activeTelemetry.actionDetail = 'Mengakses tombol feedback naskah & memicu dialog';
+    } else if (line.includes('Lihat button clicked') || line.includes('Waiting for page navigation after Lihat')) {
+        activeTelemetry.currentStep = 'Membuka Naskah Masuk';
+        activeTelemetry.currentStepKey = 'opening_doc';
+        activeTelemetry.actionDetail = 'Memuat lembar naskah dan data disposisi lengkap';
+    } else if (line.includes('Starting Lihat button search') || line.includes('Lihat search:')) {
+        activeTelemetry.currentStep = 'Memindai Tombol Naskah';
+        activeTelemetry.currentStepKey = 'scanning';
+        activeTelemetry.actionDetail = 'Mencari baris dokumen yang siap diproses';
+    } else if (line.includes('Disposisi tab')) {
+        activeTelemetry.currentStep = 'Memilih Tab Disposisi';
+        activeTelemetry.currentStepKey = 'tab_selection';
+        activeTelemetry.actionDetail = 'Membuka daftar disposisi dokumen naskah masuk';
+    } else if (line.includes('Submenu clicked') || line.includes('Naskah Masuk')) {
+        activeTelemetry.currentStep = 'Navigasi Menu';
+        activeTelemetry.currentStepKey = 'navigating';
+        activeTelemetry.actionDetail = 'Memilih jenis dokumen & verifikasi badge';
+    } else if (line.includes('Semua dokumen yang dapat diproses telah selesai') || line.includes('All documents processed') || line.includes('All menus processed')) {
+        activeTelemetry.currentStep = 'Selesai Memproses';
+        activeTelemetry.currentStepKey = 'batch_complete';
+        activeTelemetry.actionDetail = 'Seluruh target batch telah selesai diproses';
+    }
+}
+
+function getTelemetry() {
     const elapsedSec = startedAt ? Math.max(1, Math.floor((Date.now() - new Date(startedAt)) / 1000)) : 0;
-    const avgSecPerDoc = currentDocIndex > 0 ? Math.round(elapsedSec / currentDocIndex) : 18;
+    const target = activeTelemetry.totalTarget || 0;
+    const current = activeTelemetry.currentDocIndex || 0;
+    const completed = activeTelemetry.completedDocs || 0;
+
+    let percent = 0;
+    if (activeTelemetry.currentStepKey === 'batch_complete' || (target > 0 && completed >= target)) {
+        percent = 100;
+    } else if (target > 0) {
+        percent = Math.min(99, Math.round((current / target) * 100));
+    }
+
+    const remaining = target > 0 ? Math.max(0, target - current) : 0;
+    const avgSecPerDoc = current > 0 ? Math.round(elapsedSec / current) : 18;
     const etaSec = remaining * avgSecPerDoc;
 
     return {
-        currentMenu,
-        totalTarget,
-        currentDocIndex,
-        remaining,
-        currentStep,
-        currentStepKey,
-        actionDetail,
+        ...activeTelemetry,
         percent,
+        remaining,
         elapsedSec,
         avgSecPerDoc,
-        etaSec,
-        skippedCount
+        etaSec
     };
 }
 
@@ -444,7 +523,7 @@ function status() {
         lastExitCode,
         port: PORT,
         logs: recentLogs,
-        telemetry: child ? parseTelemetry(recentLogs) : null
+        telemetry: getTelemetry()
     };
 }
 

@@ -20,6 +20,7 @@ if exist ".env" (
 set "APP_PORT=%APP_PORT: =%"
 set "PORT=%APP_PORT%"
 
+rem --- 1. Pengecekan Node.js ---
 where node >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Node.js tidak ditemukan. Install dari https://nodejs.org lalu jalankan ulang.
@@ -27,16 +28,29 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if not exist "node_modules\chart.js" (
-    echo [INFO] Menginstall dependencies, mohon tunggu...
+rem --- 2. Pengecekan dan Penginstallan Modul / Dependencies ---
+set "NEED_INSTALL=0"
+if not exist "node_modules\" set "NEED_INSTALL=1"
+if not exist "node_modules\sqlite-vec\" set "NEED_INSTALL=1"
+if not exist "node_modules\chart.js\" set "NEED_INSTALL=1"
+if not exist "node_modules\puppeteer\" set "NEED_INSTALL=1"
+
+if "%NEED_INSTALL%"=="0" (
+    node -e "require('sqlite-vec'); require('chart.js'); require('dotenv'); require('puppeteer'); require('puppeteer-extra');" >nul 2>&1
+    if errorlevel 1 set "NEED_INSTALL=1"
+)
+
+if "%NEED_INSTALL%"=="1" (
+    echo [INFO] Dependencies belum lengkap atau belum terinstall. Menginstall dependencies...
     call npm install
     if errorlevel 1 (
-        echo [ERROR] npm install gagal.
+        echo [ERROR] npm install gagal. Periksa koneksi internet atau hak akses.
         pause
         exit /b 1
     )
 )
 
+rem --- 3. Inisialisasi Environment (.env) ---
 if not exist ".env" (
     if exist ".env.example" (
         copy /y ".env.example" ".env" >nul
@@ -45,6 +59,17 @@ if not exist ".env" (
     )
 )
 
+rem --- 4. Migrasi Database SQLite ---
+if not exist "data" mkdir "data"
+echo [INFO] Memeriksa dan menjalankan migrasi database SQLite...
+node scripts\migrate.js
+if errorlevel 1 (
+    echo [ERROR] Migrasi database gagal. Periksa konfigurasi SQLite atau file scripts\migrate.js.
+    pause
+    exit /b 1
+)
+
+rem --- 5. Pengecekan Port Server ---
 netstat -ano | findstr /R /C:":%APP_PORT% .*LISTENING" >nul
 if not errorlevel 1 (
     echo [INFO] Dashboard sudah berjalan di port %APP_PORT%.
@@ -52,11 +77,10 @@ if not errorlevel 1 (
     exit /b 0
 )
 
+rem --- 6. Menjalankan Dashboard Server ---
 set "SERVER_ARGS="
 if /i "%~1"=="run" set "SERVER_ARGS=--autorun"
 if /i "%~2"=="headless" set "SERVER_ARGS=%SERVER_ARGS% --headless"
-
-if not exist "data" mkdir "data"
 
 echo [INFO] Menjalankan dashboard di http://localhost:%APP_PORT% ...
 start "SIDIA Dashboard Server" /min cmd /c "node server.js %SERVER_ARGS% >> data\server.log 2>&1"

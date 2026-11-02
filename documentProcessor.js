@@ -6,6 +6,7 @@
 const chalk = require('chalk');
 const { sleep } = require('./utils');
 const { clickAndVerify } = require('./verification');
+const { extractDocId, isDocumentResolved, upsertDocument, markDocumentProcessed, markDocumentSkipped, recordPageElements } = require('./db');
 
 /**
  * Smart button finder - searches for buttons using multiple strategies
@@ -121,28 +122,28 @@ async function processSingleDocument(page, config, targetIndex = 0) {
         // Check current URL to confirm navigation
         const currentUrl = page.url();
         console.log(chalk.gray(`      → Current URL: ${currentUrl}`));
+        const docId = extractDocId(currentUrl);
 
-        // STEP 3: Wait for and click Feedback button with enhanced retry logic
-        console.log(chalk.gray('      → Waiting for Feedback button to appear (may load via AJAX)...'));
+        if (docId) {
+            const cached = isDocumentResolved(docId);
+            if (cached.resolved) {
+                console.log(chalk.yellow(`      ⚡ [SQLite Cache] Dokumen ${docId} berstatus ${cached.status} (${cached.reason}). Melewati langsung (0ms)!`));
+                return false;
+            }
+        }
 
-        // Enhanced Feedback button search with progress reporting
+        // STEP 3: Wait for and click Feedback button with DB Decoupling & Fast Exit
+        console.log(chalk.gray('      → Checking for Feedback button (optimized with SQLite metadata)...'));
+
         let feedbackButtonFound = false;
         let feedbackAttempts = 0;
-        const maxFeedbackAttempts = 15; // Up to 15 seconds
-        const feedbackButton = await findButtonSmart(page, {
-            buttonText: 'Feedback',
-            searchType: 'includes',
-            mustBeEnabled: true,
-            mustBeVisible: true,
-            timeout: 15000  // 15 seconds total timeout
-        });
+        const maxFeedbackAttempts = 6; // Max 6 seconds instead of 30 seconds
+        let lastCheck = null;
 
-        // Also implement manual retry loop with better debugging
         while (!feedbackButtonFound && feedbackAttempts < maxFeedbackAttempts) {
             feedbackAttempts++;
-            console.log(chalk.gray(`      → Feedback button search attempt ${feedbackAttempts}/${maxFeedbackAttempts}...`));
 
-            const manualCheck = await page.evaluate(() => {
+            lastCheck = await page.evaluate(() => {
                 const buttons = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
                 const feedbackBtn = buttons.find(btn => {
                     const text = (btn.textContent || '').trim();
@@ -151,6 +152,16 @@ async function processSingleDocument(page, config, targetIndex = 0) {
                     return !isOtherStaff && (lower === 'feedback' || lower === 'beri feedback' || lower.startsWith('feedback')) && btn.offsetParent !== null && !btn.disabled;
                 });
 
+                const rawElements = buttons.map(b => ({
+                    tag: b.tagName,
+                    text: (b.textContent || '').trim(),
+                    classes: b.className || '',
+                    is_visible: b.offsetParent !== null
+                }));
+
+                const buttonTexts = buttons.map(btn => (btn.textContent || '').trim());
+                const hasLoading = document.querySelector('.v-progress-linear, .loading, [role="progressbar"]') !== null;
+
                 if (feedbackBtn) {
                     const rect = feedbackBtn.getBoundingClientRect();
                     return {
@@ -158,51 +169,51 @@ async function processSingleDocument(page, config, targetIndex = 0) {
                         text: (feedbackBtn.textContent || '').trim(),
                         visible: feedbackBtn.offsetParent !== null,
                         enabled: !feedbackBtn.disabled,
-                        position: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+                        position: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+                        totalButtons: buttons.length,
+                        buttonTexts,
+                        hasLoading,
+                        rawElements
                     };
                 }
 
-                // Return debugging info if not found
                 return {
                     found: false,
                     totalButtons: buttons.length,
-                    buttonTexts: buttons.slice(0, 10).map(btn => (btn.textContent || '').trim()),
-                    hasLoading: document.querySelector('.v-progress-linear, .loading, [role="progressbar"]') !== null
+                    buttonTexts,
+                    hasLoading,
+                    rawElements
                 };
             });
 
-            if (manualCheck.found) {
+            if (lastCheck.found) {
                 feedbackButtonFound = true;
-                console.log(chalk.green(`      ✓ Feedback button found: "${manualCheck.text}"`));
-                console.log(chalk.gray(`      → Position: x=${Math.round(manualCheck.position.x)}, y=${Math.round(manualCheck.position.y)}`));
+                console.log(chalk.green(`      ✓ Feedback button found: "${lastCheck.text}"`));
                 break;
-            } else {
-                console.log(chalk.gray(`      → Not found yet. Buttons: ${manualCheck.totalButtons}, Loading: ${manualCheck.hasLoading}`));
-
-                // Show available buttons every 5th attempt for debugging
-                if (feedbackAttempts % 5 === 0) {
-                    console.log(chalk.gray('      → Available buttons:', JSON.stringify(manualCheck.buttonTexts, null, 2)));
-                }
-
-                await sleep(1000); // Wait 1 second between attempts
             }
+
+            // Fast Detection: If page finished loading and has staff-only feedback or no action button
+            if (!lastCheck.hasLoading && lastCheck.totalButtons >= 4 && feedbackAttempts >= 2) {
+                const hasStaffFeedbackOnly = lastCheck.buttonTexts.some(t => t.toLowerCase().includes('staff lainnya'));
+                if (hasStaffFeedbackOnly) {
+                    console.log(chalk.yellow(`      ℹ [SQLite Decoupling] Terdeteksi dokumen hanya untuk "Feedback Staff Lainnya" (tidak ada form untuk akun ini).`));
+                    if (docId) {
+                        markDocumentSkipped(docId, 'STAFF_FEEDBACK_ONLY', lastCheck.buttonTexts);
+                        recordPageElements(docId, lastCheck.rawElements);
+                    }
+                    return false;
+                }
+            }
+
+            await sleep(1000);
         }
 
-        if (!feedbackButtonFound && !feedbackButton.found) {
-            console.log(chalk.red('      ✗ Feedback button not found after all attempts'));
-
-            // Final debug info
-            const finalDebug = await page.evaluate(() => {
-                const buttons = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
-                return {
-                    totalButtons: buttons.length,
-                    buttonTexts: buttons.map(btn => (btn.textContent || '').trim()),
-                    url: window.location.href,
-                    hasLoading: document.querySelector('.v-progress-linear, .loading, [role="progressbar"]') !== null
-                };
-            });
-
-            console.log(chalk.gray('      → Final state:', JSON.stringify(finalDebug, null, 2)));
+        if (!feedbackButtonFound) {
+            console.log(chalk.red('      ✗ Feedback button tidak ditemukan pada dokumen ini'));
+            if (docId && lastCheck) {
+                markDocumentSkipped(docId, 'NO_FEEDBACK_BUTTON', lastCheck.buttonTexts);
+                recordPageElements(docId, lastCheck.rawElements);
+            }
             return false;
         }
 
@@ -867,6 +878,9 @@ async function processSingleDocument(page, config, targetIndex = 0) {
         }
 
         console.log(chalk.green('      ✓ Document processing completed successfully'));
+        if (docId) {
+            markDocumentProcessed(docId, { url: page.url() });
+        }
         return true;
 
     } catch (error) {

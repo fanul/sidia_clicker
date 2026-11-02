@@ -660,3 +660,235 @@
     align-items: center;
     gap: 12px;
   }
+
+
+  /* Searchable Multiselect Dropdown */
+  #form-settings {
+    position: relative;
+    z-index: 20;
+  }
+  .doc-types-group {
+    grid-column: 1 / -1;
+    position: relative;
+    z-index: 30;
+  }
+  .searchable-multiselect {
+    position: relative;
+    user-select: none;
+    font-size: 13px;
+  }
+  .sm-trigger {
+    min-height: 42px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: var(--bg);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .searchable-multiselect.open .sm-trigger,
+  .sm-trigger:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  }
+  .sm-selected-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    flex: 1;
+  }
+  .sm-placeholder {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+  .sm-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.28);
+    color: var(--primary);
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+  }
+  .sm-tag-code {
+    opacity: 0.75;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+  }
+  .sm-tag-remove {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    margin-left: 2px;
+    font-size: 12px;
+    line-height: 1;
+  }
+  .sm-tag-remove:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+  }
+  .sm-trigger-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .sm-count-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--primary);
+    white-space: nowrap;
+  }
+  .sm-arrow {
+    font-size: 11px;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+  }
+  .searchable-multiselect.open .sm-arrow {
+    transform: rotate(180deg);
+  }
+  .sm-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: #111827;
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    border-radius: 10px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .searchable-multiselect.open .sm-dropdown {
+    display: flex;
+  }
+  .sm-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.05);
+    border-bottom: 1px solid var(--card-border);
+    align-items: center;
+  }
+  #sm-search {
+    flex: 1;
+    padding: 6px 10px;
+    font-size: 12.5px;
+    border-radius: 6px;
+    border: 1px solid var(--card-border);
+    background: var(--bg);
+    color: var(--text-primary);
+    outline: none;
+  }
+  #sm-search:focus {
+    border-color: var(--primary);
+  }
+  .sm-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .btn-sm {
+    padding: 5px 10px;
+    font-size: 11.5px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-sm-primary {
+    background: var(--primary-gradient);
+    color: #fff;
+    border: none;
+  }
+  .btn-sm-primary:hover {
+    opacity: 0.92;
+    transform: translateY(-1px);
+  }
+  .btn-sm-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--card-border);
+  }
+  .btn-sm-ghost:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.3);
+  }
+  .sm-options-list {
+    max-height: 290px;
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .sm-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    user-select: none;
+  }
+  .sm-option:hover {
+    background: rgba(99, 102, 241, 0.08);
+  }
+  .sm-option.selected {
+    background: rgba(99, 102, 241, 0.13);
+  }
+  .sm-option-left {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .sm-option-checkbox {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--primary);
+    cursor: pointer;
+    pointer-events: none;
+  }
+  .sm-option-label {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .sm-option-code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-secondary);
+    border: 1px solid var(--card-border);
+  }
+  .sm-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12.5px;
+  }

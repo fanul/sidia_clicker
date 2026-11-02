@@ -48,7 +48,30 @@
           <div class="form-group"><label>Username SIDIA</label><input type="text" id="cfg-user" placeholder="NPP / Username" autocomplete="off"></div>
           <div class="form-group"><label>Password SIDIA</label><input type="password" id="cfg-pass" placeholder="••••••••" autocomplete="new-password"></div>
           <div class="form-group"><label>Pesan Feedback Default</label><input type="text" id="cfg-feedback" placeholder="dipedomani dan dilaksanakan"></div>
-          <div class="form-group"><label>Filter Kode Jenis Dokumen</label><input type="text" id="cfg-types" placeholder="NKH0002,NKH0001,NKH0016,NKH0017"><span class="hint">Pisahkan dengan koma</span></div>
+          <div class="form-group doc-types-group">
+            <label>Filter Kode Jenis Dokumen</label>
+            <div class="searchable-multiselect" id="doc-types-multiselect">
+              <div class="sm-trigger" id="sm-trigger" tabindex="0">
+                <div class="sm-selected-tags" id="sm-selected-tags"></div>
+                <div class="sm-trigger-right">
+                  <span class="sm-count-badge" id="sm-count-badge">0 dipilih</span>
+                  <span class="sm-arrow">▾</span>
+                </div>
+              </div>
+              <div class="sm-dropdown" id="sm-dropdown">
+                <div class="sm-toolbar">
+                  <input type="text" id="sm-search" placeholder="Cari nama atau kode dokumen..." autocomplete="off">
+                  <div class="sm-actions">
+                    <button type="button" id="sm-btn-add-all" class="btn-sm btn-sm-primary">+ Add All</button>
+                    <button type="button" id="sm-btn-clear-all" class="btn-sm btn-sm-ghost">Clear</button>
+                  </div>
+                </div>
+                <div class="sm-options-list" id="sm-options-list"></div>
+              </div>
+            </div>
+            <input type="hidden" id="cfg-types">
+            <span class="hint">Pilih jenis dokumen yang akan diproses bot</span>
+          </div>
           <div class="form-group"><label>Submenu Yang Dilewati (Opsional)</label><input type="text" id="cfg-skip" placeholder="Contoh: Surat Rahasia"></div>
         </div>
         <div class="form-footer">

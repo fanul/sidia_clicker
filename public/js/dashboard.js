@@ -8,6 +8,8 @@
   const $ = id => document.getElementById(id);
   let decisionGrid = null;
   let localTimerStart = null;
+  let stickyTotalTarget = 0;
+  let stickyCurrentMenu = 'Naskah Masuk';
 
   function escapeHtml(str) {
     return String(str || '').replace(/[&<>"']/g, c => ({
@@ -17,8 +19,8 @@
 
   // Parse telemetry directly from logs as fallback/enrichment
   function parseClientTelemetry(logs, startedAtStr) {
-    let currentMenu = 'Naskah Masuk';
-    let totalTarget = 0;
+    let currentMenu = stickyCurrentMenu || 'Naskah Masuk';
+    let totalTarget = stickyTotalTarget || 0;
     let currentDocIndex = 0;
     let currentStep = 'Memproses Naskah';
     let currentStepKey = 'opening_doc';
@@ -34,8 +36,12 @@
         if (p) docPerihal = p[1].trim();
       }
       if (!totalTarget) {
-        const m = line.match(/Submenu clicked:\s*([A-Za-z\s]+)\s*(\d+)/i) || line.match(/Processing menu:\s*([A-Za-z\s]+)\s*(\d+)/i);
-        if (m) { currentMenu = m[1].trim(); totalTarget = parseInt(m[2], 10); }
+        const m = line.match(/(?:Submenu clicked|Processing menu(?:\s+\d+\/\d+)?):\s*([A-Za-z\s]+?)(?:\s+(\d+))?$/i) ||
+                  line.match(/\d+\.\s*([A-Za-z\s]+?)\s*\(\s*(\d+)\s*documents?\)/i);
+        if (m) {
+          if (m[1] && m[1].trim()) { currentMenu = m[1].trim(); stickyCurrentMenu = currentMenu; }
+          if (m[2]) { totalTarget = parseInt(m[2], 10); stickyTotalTarget = totalTarget; }
+        }
       }
       if (!currentDocIndex) {
         const d = line.match(/Processing document\s*(\d+)/i) || line.match(/Preparing to process document\s*(\d+)/i);
@@ -146,6 +152,14 @@
       }
 
       // Synchronize Decision Grid with live telemetry
+      if (resStatus.telemetry) {
+        if (resStatus.telemetry.totalTarget > 0) {
+          stickyTotalTarget = resStatus.telemetry.totalTarget;
+        }
+        if (resStatus.telemetry.currentMenu) {
+          stickyCurrentMenu = resStatus.telemetry.currentMenu;
+        }
+      }
       const lastLogs = resStatus.logs || [];
       const telem = resStatus.telemetry || parseClientTelemetry(lastLogs, resStatus.startedAt);
 
@@ -168,6 +182,177 @@
     }
   }
 
+  // Document Types Searchable Multiselect Component
+  const DOC_TYPE_DEFINITIONS = [
+    { code: 'NKH0041', label: 'SURAT PERINTAH' },
+    { code: 'NKH0015', label: 'SURAT MASUK' },
+    { code: 'NKH0023', label: 'BERITA ACARA' },
+    { code: 'NKH0001', label: 'MEMO INTERNAL' },
+    { code: 'NKH0002', label: 'MEMO EKSTERNAL' },
+    { code: 'NKH0017', label: 'SURAT RAHASIA' },
+    { code: 'NKH0016', label: 'SURAT BIASA' }
+  ];
+
+  let selectedDocCodes = new Set();
+  let docTypesFilterQuery = '';
+
+  function renderDocTypes() {
+    const listEl = $('sm-options-list');
+    const tagsEl = $('sm-selected-tags');
+    const badgeEl = $('sm-count-badge');
+    const inputHidden = $('cfg-types');
+
+    if (inputHidden) {
+      inputHidden.value = Array.from(selectedDocCodes).join(',');
+    }
+
+    if (tagsEl) {
+      if (selectedDocCodes.size === 0) {
+        tagsEl.innerHTML = '<span class="sm-placeholder">Pilih jenis dokumen...</span>';
+      } else {
+        tagsEl.innerHTML = Array.from(selectedDocCodes).map(code => {
+          const item = DOC_TYPE_DEFINITIONS.find(d => d.code === code);
+          const label = item ? item.label : code;
+          return `<span class="sm-tag" data-code="${code}">
+            <span>${label}</span>
+            <span class="sm-tag-code">(${code})</span>
+            <span class="sm-tag-remove" data-remove="${code}" title="Hapus">✕</span>
+          </span>`;
+        }).join('');
+      }
+    }
+
+    if (badgeEl) {
+      badgeEl.textContent = `${selectedDocCodes.size} dipilih`;
+    }
+
+    if (listEl) {
+      const q = docTypesFilterQuery.trim().toLowerCase();
+      const allItems = [...DOC_TYPE_DEFINITIONS];
+      selectedDocCodes.forEach(c => {
+        if (!allItems.some(item => item.code === c)) {
+          allItems.push({ code: c, label: c });
+        }
+      });
+
+      const filtered = allItems.filter(item => {
+        if (!q) return true;
+        return item.label.toLowerCase().includes(q) || item.code.toLowerCase().includes(q);
+      });
+
+      if (filtered.length === 0) {
+        listEl.innerHTML = '<div class="sm-empty">Tidak ada jenis dokumen yang cocok</div>';
+      } else {
+        listEl.innerHTML = filtered.map(item => {
+          const isChecked = selectedDocCodes.has(item.code);
+          return `<div class="sm-option ${isChecked ? 'selected' : ''}" data-code="${item.code}">
+            <div class="sm-option-left">
+              <input type="checkbox" class="sm-option-checkbox" ${isChecked ? 'checked' : ''} data-check="${item.code}">
+              <span class="sm-option-label">${item.label}</span>
+            </div>
+            <span class="sm-option-code">${item.code}</span>
+          </div>`;
+        }).join('');
+      }
+    }
+  }
+
+  function setDocTypesSelection(codesStr) {
+    selectedDocCodes.clear();
+    if (codesStr) {
+      const parts = codesStr.split(',').map(s => s.trim()).filter(Boolean);
+      parts.forEach(c => selectedDocCodes.add(c));
+    }
+    renderDocTypes();
+  }
+
+  function initDocTypesSelect() {
+    const container = $('doc-types-multiselect');
+    const trigger = $('sm-trigger');
+    const searchInput = $('sm-search');
+    const btnAddAll = $('sm-btn-add-all');
+    const btnClearAll = $('sm-btn-clear-all');
+    const listEl = $('sm-options-list');
+    const tagsEl = $('sm-selected-tags');
+
+    if (!container || !trigger) return;
+
+    trigger.addEventListener('click', (e) => {
+      if (e.target.closest('.sm-tag-remove')) return;
+      const isOpen = container.classList.toggle('open');
+      if (isOpen && searchInput) {
+        searchInput.focus();
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!container.contains(e.target)) {
+        container.classList.remove('open');
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        container.classList.remove('open');
+      }
+    });
+
+    if (tagsEl) {
+      tagsEl.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('.sm-tag-remove');
+        if (removeBtn) {
+          e.stopPropagation();
+          const code = removeBtn.getAttribute('data-remove');
+          if (code) {
+            selectedDocCodes.delete(code);
+            renderDocTypes();
+          }
+        }
+      });
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        docTypesFilterQuery = e.target.value;
+        renderDocTypes();
+      });
+    }
+
+    if (btnAddAll) {
+      btnAddAll.addEventListener('click', (e) => {
+        e.stopPropagation();
+        DOC_TYPE_DEFINITIONS.forEach(d => selectedDocCodes.add(d.code));
+        renderDocTypes();
+      });
+    }
+
+    if (btnClearAll) {
+      btnClearAll.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedDocCodes.clear();
+        renderDocTypes();
+      });
+    }
+
+    if (listEl) {
+      listEl.addEventListener('click', (e) => {
+        const optionEl = e.target.closest('.sm-option');
+        if (!optionEl) return;
+        const code = optionEl.getAttribute('data-code');
+        if (!code) return;
+
+        if (selectedDocCodes.has(code)) {
+          selectedDocCodes.delete(code);
+        } else {
+          selectedDocCodes.add(code);
+        }
+        renderDocTypes();
+      });
+    }
+
+    renderDocTypes();
+  }
+
   // Load and save settings
   async function loadSettings() {
     try {
@@ -175,8 +360,8 @@
       if ($('cfg-user')) $('cfg-user').value = cfg.SIDIA_USERNAME || '';
       if ($('cfg-pass')) $('cfg-pass').value = '';
       if ($('cfg-feedback')) $('cfg-feedback').value = cfg.FEEDBACK_MESSAGE || '';
-      if ($('cfg-types')) $('cfg-types').value = cfg.DOCUMENT_TYPES || '';
       if ($('cfg-skip')) $('cfg-skip').value = cfg.SKIP_SUBMENUS || '';
+      setDocTypesSelection(cfg.DOCUMENT_TYPES || '');
     } catch (e) {}
   }
 
@@ -227,6 +412,7 @@
     if (formSettings) {
       formSettings.onsubmit = async (e) => {
         e.preventDefault();
+        if ($('doc-types-multiselect')) $('doc-types-multiselect').classList.remove('open');
         const msgEl = $('cfg-save-msg');
         if (msgEl) {
           msgEl.textContent = 'Menyimpan...';
@@ -403,6 +589,7 @@
   // Initialize once DOM is ready
   window.addEventListener('DOMContentLoaded', () => {
     decisionGrid = new DecisionGrid('stage');
+    initDocTypesSelect();
     initListeners();
     loadSettings();
     checkSessionStatus();

@@ -34,7 +34,10 @@ const CONFIG = {
     headless: process.argv.includes('--headless') ? true : 
               (process.argv.includes('--no-headless') ? false : 
               (process.env.HEADLESS === 'true' || process.env.HEADLESS === 'True' || process.env.HEADLESS === 'TRUE')),
-    documentTypes: (process.env.DOCUMENT_TYPES || 'NKH0002,NKH0001,NKH0016,NKH0017').split(','),
+    documentTypes: (process.env.DOCUMENT_TYPES !== undefined ? process.env.DOCUMENT_TYPES : 'NKH0002,NKH0001,NKH0016,NKH0017')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean),
     clearSessionBeforeRole: process.env.CLEAR_SESSION_BEFORE_ROLE !== 'false', // Default: true
     enableScreenshots: process.env.ENABLE_SCREENSHOTS === 'true', // Default: false (disabled)
     skipSubmenus: (process.env.SKIP_SUBMENUS || '').split(',').filter(s => s.trim()), // Skip specific submenus

@@ -12,8 +12,20 @@ const { record } = require('./tracker');
 
 // Import new modular components
 const { clickSubmenu } = require('./submenuNavigation');
+const { extractDocId, isDocumentResolved } = require('./db');
 const { clickDisposisiTab } = require('./disposisiTab');
 const { processSingleDocument } = require('./documentProcessor');
+
+// Mapping code jenis dokumen ke nama submenu SIDIA
+const DOC_TYPE_MAPPING = {
+    'NKH0041': 'SURAT PERINTAH',
+    'NKH0015': 'SURAT MASUK',
+    'NKH0023': 'BERITA ACARA',
+    'NKH0001': 'MEMO INTERNAL',
+    'NKH0002': 'MEMO EKSTERNAL',
+    'NKH0017': 'SURAT RAHASIA',
+    'NKH0016': 'SURAT BIASA'
+};
 
 /**
  * Navigate to Naskah Masuk menu - Enhanced to properly click and wait
@@ -373,12 +385,24 @@ async function processMenusWithBadges(page, config) {
         };
     }
 
-    // Filter out skipped submenus
+    // Filter out skipped submenus and apply document type filters
+    const allowedTypes = (config.documentTypes || [])
+        .map(t => (typeof t === 'string' ? t.trim().toUpperCase() : ''))
+        .filter(Boolean);
+
+    if (allowedTypes.length > 0) {
+        console.log(chalk.cyan(`  → Filter jenis dokumen aktif: ${allowedTypes.join(', ')}`));
+    }
+
     const menusToProcess = menus.filter(menu => {
+        const menuTextUpper = (menu.text || '').toUpperCase();
+        const menuHrefUpper = (menu.href || '').toUpperCase();
+
+        // 1. Filter out explicitly skipped submenus
         if (config.skipSubmenus && config.skipSubmenus.length > 0) {
             const shouldSkip = config.skipSubmenus.some(skipTerm => {
-                return menu.text.toLowerCase().includes(skipTerm.toLowerCase()) ||
-                       menu.href.includes(skipTerm);
+                const term = skipTerm.trim().toLowerCase();
+                return term && (menu.text.toLowerCase().includes(term) || menu.href.toLowerCase().includes(term));
             });
 
             if (shouldSkip) {
@@ -386,6 +410,32 @@ async function processMenusWithBadges(page, config) {
                 return false;
             }
         }
+
+        // 2. Filter by allowed document types (DOCUMENT_TYPES)
+        if (allowedTypes.length > 0) {
+            const isAllowed = allowedTypes.some(allowed => {
+                // Direct match on code in href or text (e.g. 'NKH0015')
+                if (menuHrefUpper.includes(allowed) || menuTextUpper.includes(allowed)) {
+                    return true;
+                }
+                // Match known title mapping (e.g. 'NKH0015' -> 'SURAT MASUK')
+                const mappedTitle = DOC_TYPE_MAPPING[allowed];
+                if (mappedTitle && menuTextUpper.includes(mappedTitle)) {
+                    return true;
+                }
+                // Match direct label if allowed is already a label name
+                if (menuTextUpper.includes(allowed)) {
+                    return true;
+                }
+                return false;
+            });
+
+            if (!isAllowed) {
+                console.log(chalk.yellow(`  ⊗ Skipping submenu: "${menu.text}" (tidak termasuk dalam filter dokumen: ${allowedTypes.join(', ')})`));
+                return false;
+            }
+        }
+
         return true;
     });
 
@@ -730,7 +780,7 @@ async function processDocumentsFromTable(page, menu, config) {
 
         } else {
             failedAttemptsForCurrentDoc++;
-            console.log(chalk.red(`    ✗ Gagal memproses dokumen pada baris ke-${docSkipIndex + 1} (Percobaan ${failedAttemptsForCurrentDoc}/2)`));
+            console.log(chalk.red(`    ✗ Gagal/Lewati dokumen pada baris ke-${docSkipIndex + 1}`));
 
             // Pastikan kita kembali ke list page jika masih di detail page
             const currentUrl = page.url();
@@ -740,16 +790,20 @@ async function processDocumentsFromTable(page, menu, config) {
                     const kembali = btns.find(b => (b.textContent || '').toUpperCase().includes('KEMBALI'));
                     if (kembali) kembali.click();
                 });
-                await sleep(3000);
+                await sleep(2000);
             }
 
-            if (failedAttemptsForCurrentDoc >= 2) {
-                console.log(chalk.yellow(`    ⚠️ Melewati dokumen baris ke-${docSkipIndex + 1} karena tidak memiliki tombol feedback/form setelah 2x percobaan.`));
+            const docId = extractDocId(currentUrl);
+            const isResolved = docId && isDocumentResolved(docId).resolved;
+
+            // Jika dokumen sudah tercatat di SQLite (misal staff-only/no-feedback) atau sudah 2x coba, langsung lewati tanpa buang waktu!
+            if (isResolved || failedAttemptsForCurrentDoc >= 2) {
+                console.log(chalk.yellow(`    ⚠️ [SQLite Cache] Melewati dokumen baris ke-${docSkipIndex + 1} (${isResolved ? 'terkonfirmasi di SQLite' : 'setelah 2x percobaan'}).`));
                 docSkipIndex++;
                 failedAttemptsForCurrentDoc = 0;
             } else {
                 console.log(chalk.yellow('    → Mencoba ulang dokumen yang sama...'));
-                await sleep(3000);
+                await sleep(2000);
             }
         }
 
