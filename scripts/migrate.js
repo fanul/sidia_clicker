@@ -20,6 +20,17 @@ function runMigrations() {
 
     const db = new DatabaseSync(DB_PATH, { allowExtension: true });
     
+    // Aktifkan mode WAL & timeout agar aman saat multi-proses
+    try {
+        db.exec(`
+            PRAGMA journal_mode = WAL;
+            PRAGMA busy_timeout = 5000;
+            PRAGMA synchronous = NORMAL;
+        `);
+    } catch (e) {
+        console.warn(`[MIGRATE] Peringatan pragma WAL: ${e.message}`);
+    }
+
     // Load sqlite-vec extension
     try {
         sqliteVec.load(db);

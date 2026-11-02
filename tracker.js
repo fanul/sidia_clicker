@@ -25,14 +25,18 @@ function record(type, data = {}) {
 }
 
 /**
- * Read all recorded events
+ * Read all recorded events (bounded to last N events for performance)
+ * @param {number} limit - Maximum recent events to load (default 5000)
  * @returns {Object[]} Events, oldest first
  */
-function readEvents() {
+function readEvents(limit = 5000) {
     try {
-        return fs.readFileSync(EVENTS_FILE, 'utf8')
+        if (!fs.existsSync(EVENTS_FILE)) return [];
+        const lines = fs.readFileSync(EVENTS_FILE, 'utf8')
             .split('\n')
-            .filter(Boolean)
+            .filter(Boolean);
+        const slice = lines.length > limit ? lines.slice(-limit) : lines;
+        return slice
             .map(line => {
                 try { return JSON.parse(line); } catch (e) { return null; }
             })

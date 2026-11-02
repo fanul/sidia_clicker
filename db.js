@@ -24,6 +24,18 @@ function getDb() {
         }
 
         dbInstance = new DatabaseSync(DB_PATH, { allowExtension: true });
+        
+        // Optimasi konkurensi multi-proses & pencegahan lock SQLITE_BUSY
+        try {
+            dbInstance.exec(`
+                PRAGMA journal_mode = WAL;
+                PRAGMA busy_timeout = 5000;
+                PRAGMA synchronous = NORMAL;
+            `);
+        } catch (pragmaErr) {
+            console.warn('[DB] Warning setting WAL pragma:', pragmaErr.message);
+        }
+
         try {
             sqliteVec.load(dbInstance);
         } catch (vecErr) {

@@ -629,6 +629,62 @@ async function processMenusWithBadges(page, config) {
  * @param {Object} config - Configuration object
  * @returns {Promise<Object>} Processing statistics for this menu
  */
+/**
+ * Memastikan browser kembali ke halaman daftar dokumen (table) dari halaman detail naskah
+ * @param {Page} page
+ * @returns {Promise<boolean>}
+ */
+async function ensureBackToDocumentList(page) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        const state = await page.evaluate(() => {
+            const btns = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
+            const hasLihat = btns.some(b => (b.textContent || '').includes('Lihat') && b.offsetParent !== null);
+            const kembaliBtn = btns.find(b => {
+                const t = (b.textContent || '').trim().toUpperCase();
+                return (t.includes('KEMBALI') || t.includes('BACK')) && b.offsetParent !== null && !b.disabled;
+            });
+            return {
+                url: window.location.href,
+                hasLihat,
+                hasKembali: !!kembaliBtn
+            };
+        });
+
+        if (state.hasLihat) {
+            return true;
+        }
+
+        if (state.hasKembali) {
+            console.log(chalk.gray(`    → Klik tombol Kembali (percobaan ${attempt})...`));
+            await page.evaluate(() => {
+                const btns = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
+                const kembaliBtn = btns.find(b => {
+                    const t = (b.textContent || '').trim().toUpperCase();
+                    return (t.includes('KEMBALI') || t.includes('BACK')) && b.offsetParent !== null && !b.disabled;
+                });
+                if (kembaliBtn) kembaliBtn.click();
+            });
+            await sleep(2500);
+        } else {
+            console.log(chalk.yellow(`    → Tombol Kembali tidak terdeteksi, mencoba browser back (percobaan ${attempt})...`));
+            try {
+                await page.goBack({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+            } catch (e) {}
+            await sleep(2500);
+        }
+
+        const recheck = await page.evaluate(() => {
+            const btns = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
+            return btns.some(b => (b.textContent || '').includes('Lihat') && b.offsetParent !== null);
+        });
+        if (recheck) {
+            console.log(chalk.green('    ✓ Berhasil kembali ke halaman daftar naskah'));
+            return true;
+        }
+    }
+    return false;
+}
+
 async function processDocumentsFromTable(page, menu, config) {
     const stats = {
         totalProcessed: 0,
@@ -662,67 +718,28 @@ async function processDocumentsFromTable(page, menu, config) {
         console.log(chalk.gray(`    → Current URL: ${currentState.url}`));
         console.log(chalk.gray(`    → Has Lihat buttons: ${currentState.hasLihatButtons}`));
 
-        // Check if we're on a document detail page (where Disposisi tab doesn't exist)
-        const isOnDetailPage = currentState.url.includes('/inbox/') && currentState.url.includes('?obj=');
+        // Check if we're on a document detail page or missing Lihat buttons
+        if (!currentState.hasLihatButtons) {
+            const isDetail = await page.evaluate(() => {
+                const btns = Array.from(document.querySelectorAll('button, .v-btn, [type="button"]'));
+                return btns.some(b => (b.textContent || '').toUpperCase().includes('KEMBALI') && b.offsetParent !== null);
+            });
 
-        if (isOnDetailPage) {
-            consecutiveDetailPageErrors++;
-            console.log(chalk.yellow(`    → Still on document detail page (error ${consecutiveDetailPageErrors}/${maxDetailPageErrors})`));
-            console.log(chalk.yellow('    → Attempting navigation away from detail page...'));
-
-            // Try to navigate away from the detail page
-            try {
-                // Strategy 1: Try to click Kembali button
-                const kembaliClicked = await page.evaluate(() => {
-                    const buttons = Array.from(document.querySelectorAll('button, .v-btn'));
-                    for (const btn of buttons) {
-                        const text = (btn.textContent || '').trim().toUpperCase();
-                        if (text.includes('KEMBALI') && btn.offsetParent !== null && !btn.disabled) {
-                            btn.click();
-                            return true;
-                        }
-                    }
-                    return false;
-                });
-
-                if (kembaliClicked) {
-                    console.log(chalk.gray('    → Clicked Kembali to leave detail page'));
-                    await sleep(3000);
-                } else {
-                    // Strategy 2: Try browser back
-                    console.log(chalk.gray('    → Kembali not found, trying browser back...'));
-                    await page.goBack({ waitUntil: 'networkidle2' });
-                    await sleep(3000);
+            if (isDetail) {
+                consecutiveDetailPageErrors++;
+                console.log(chalk.yellow(`    → Terdeteksi masih di halaman detail dokumen (kesalahan ${consecutiveDetailPageErrors}/${maxDetailPageErrors})`));
+                const backOk = await ensureBackToDocumentList(page);
+                if (backOk) {
+                    consecutiveDetailPageErrors = 0;
+                    continue;
                 }
-
-                // Check if navigation worked
-                const newUrl = page.url();
-                const stillOnDetailPage = newUrl.includes('/inbox/') && newUrl.includes('?obj=');
-
-                if (!stillOnDetailPage) {
-                    console.log(chalk.green('    → Successfully navigated away from detail page'));
-                    consecutiveDetailPageErrors = 0; // Reset counter on success
-                    continue; // Try again with clean state
-                } else {
-                    console.log(chalk.yellow('    → Still on detail page after navigation attempt'));
-                    if (consecutiveDetailPageErrors >= maxDetailPageErrors) {
-                        console.log(chalk.red('    → Max detail page errors reached, breaking loop'));
-                        break;
-                    }
-                    await sleep(2000); // Wait before next attempt
-                    continue; // Try again
-                }
-
-            } catch (navError) {
-                console.log(chalk.red(`    → Navigation failed: ${navError.message}`));
                 if (consecutiveDetailPageErrors >= maxDetailPageErrors) {
-                    console.log(chalk.red('    → Max detail page errors reached, breaking loop'));
+                    console.log(chalk.red('    → Batas maksimal percobaan keluar dari halaman detail tercapai.'));
                     break;
                 }
                 continue;
             }
         } else {
-            // Reset counter when we're not on detail page
             consecutiveDetailPageErrors = 0;
         }
 
@@ -782,18 +799,11 @@ async function processDocumentsFromTable(page, menu, config) {
             failedAttemptsForCurrentDoc++;
             console.log(chalk.red(`    ✗ Gagal/Lewati dokumen pada baris ke-${docSkipIndex + 1}`));
 
-            // Pastikan kita kembali ke list page jika masih di detail page
             const currentUrl = page.url();
-            if (currentUrl.includes('/inbox/') && currentUrl.includes('?obj=')) {
-                await page.evaluate(() => {
-                    const btns = Array.from(document.querySelectorAll('button, .v-btn'));
-                    const kembali = btns.find(b => (b.textContent || '').toUpperCase().includes('KEMBALI'));
-                    if (kembali) kembali.click();
-                });
-                await sleep(2000);
-            }
-
             const docId = extractDocId(currentUrl);
+
+            // Pastikan browser kembali ke halaman daftar dokumen dengan verifikasi penuh
+            await ensureBackToDocumentList(page);
             const isResolved = docId && isDocumentResolved(docId).resolved;
 
             // Jika dokumen sudah tercatat di SQLite (misal staff-only/no-feedback) atau sudah 2x coba, langsung lewati tanpa buang waktu!
@@ -828,28 +838,7 @@ async function processDocumentsFromTable(page, menu, config) {
     console.log(chalk.yellow('\n  🔹 STEP 4.5: Checking if sub-menu flow should continue...'));
 
     // Make sure we're on the document list page (not detail page)
-    const currentUrl = page.url();
-    const isOnDetailPage = currentUrl.includes('/inbox/') && currentUrl.includes('?obj=');
-
-    if (isOnDetailPage) {
-        console.log(chalk.yellow('    → Still on document detail page, navigating away...'));
-        // Navigate away to get back to document list
-        const kembaliClicked = await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button, .v-btn'));
-            for (const btn of buttons) {
-                const text = (btn.textContent || '').trim().toUpperCase();
-                if (text.includes('KEMBALI') && btn.offsetParent !== null && !btn.disabled) {
-                    btn.click();
-                    return true;
-                }
-            }
-            return false;
-        });
-
-        if (kembaliClicked) {
-            await sleep(3000);
-        }
-    }
+    await ensureBackToDocumentList(page);
 
     // Click Disposisi tab to ensure we're on the right view
     const disposisiResult = await clickDisposisiTab(page);
@@ -887,5 +876,6 @@ module.exports = {
     processMenusWithBadges,
     processSingleDocument,
     checkForDocuments,
-    checkRemainingDocuments
+    checkRemainingDocuments,
+    ensureBackToDocumentList
 };

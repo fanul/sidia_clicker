@@ -546,8 +546,13 @@ function sendFile(res, file, type) {
 function readBody(req) {
     return new Promise(resolve => {
         let raw = '';
-        req.on('data', c => { raw += c; if (raw.length > 1e5) req.destroy(); });
+        let tooLarge = false;
+        req.on('data', c => {
+            raw += c;
+            if (raw.length > 2e6) tooLarge = true;
+        });
         req.on('end', () => {
+            if (tooLarge) return resolve({ _error: 'Ukuran data terlalu besar (maksimal 2MB)' });
             try { resolve(JSON.parse(raw || '{}')); } catch (e) { resolve({}); }
         });
     });
@@ -560,10 +565,10 @@ function readBody(req) {
 function isAllowedRequest(req) {
     const allowedHosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`];
     if (!allowedHosts.includes(req.headers.host)) return false;
-    if (req.method === 'POST') {
+    if (req.method === 'POST' || req.method === 'DELETE') {
         const origin = req.headers.origin;
         if (origin && !allowedHosts.some(h => origin === `http://${h}`)) return false;
-        if (!(req.headers['content-type'] || '').startsWith('application/json')) return false;
+        if (req.method === 'POST' && !(req.headers['content-type'] || '').startsWith('application/json')) return false;
     }
     return true;
 }
@@ -637,6 +642,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url === '/api/session') {
         const body = await readBody(req);
+        if (body && body._error) return sendJson(res, 413, { ok: false, message: body._error });
         try {
             const resData = saveSessionData(body.session || body);
             return sendJson(res, 200, { ok: true, message: resData.message, status: getSessionStatus() });
